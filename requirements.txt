@@ -1,0 +1,29 @@
+# --- AI & Procesare Imagini ---
+torch
+torchvision
+numpy
+pandas
+scikit-learn
+Pillow
+transformers
+diffusers
+accelerate
+safetensors
+google-genai
+google
+icrawler 
+face_recognition 
+opencv-python
+
+# --- Interfața Web (Frontend) ---
+streamlit
+
+# --- Baza de date (Backend) ---
+psycopg2-binary`
+SQLAlchemy
+
+# --- Utilitare & Grafice ---
+matplotlib
+seaborn
+python-dotenv
+tqdm
