@@ -26,52 +26,71 @@ pipe = FluxPipeline.from_pretrained(
 )
 pipe.enable_model_cpu_offload()
 
-
-people = ["Donald Trump"]
-locations = ["at the White House", "on a podium", "on stage", "at the Resolute Desk", "White House Garden"]
-actions = ["looks at camera", "speaks at a microphone", "waves to crowd", "smiles gently", "looks serious", "shakes hands with someone"]
-styles = ["Hyperrealistic photo, high detail, raw photography"]
-
-print(f"Începem generarea în batch-uri de câte {BATCH_SIZE}...")
-
-
-for i in range(0, TOTAL_IMAGES, BATCH_SIZE):
-    
-    
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    
-    current_prompts = []
-    for _ in range(BATCH_SIZE):
-        ppl = random.choice(people)
-        loc = random.choice(locations)
-        act = random.choice(actions)
-        style = random.choice(styles)
-        prompt_text = f"{style}, {ppl}, {act}, {loc}"
-        current_prompts.append(prompt_text)
-    
-    print(f"Generare batch {i} - {i+BATCH_SIZE}...")
-
-    
-    
-    images = pipe(
-        current_prompts,  
-        height=1024,
-        width=1024,
-        guidance_scale=3.5, 
-        num_inference_steps=50, 
-        max_sequence_length=512,
-        generator=torch.Generator("cuda").manual_seed(random.randint(0, 1000000))
-    ).images
-    
-    
-    for idx, img in enumerate(images):
-        file_index = i + idx
-        if file_index >= TOTAL_IMAGES: break 
+class PersonSelection:
+    def __init__(self, name, locations, actions, styles):
+        self.name = name
+        self.locations = locations
+        self.actions = actions
         
-        filename = output_dir / f"flux_gen_{file_index}.jpg"
-        img.save(filename)
-        print(f"  -> Salvat: {filename}")
+    def get_prompt():
+        
+        location_random = random.choice(self.locations)
+        action_random = random.choice(self.actions)
+        
+        style = ["Hyperrealistic photo, high detail, raw photography, detailed skin texture, pores visible"]
+        
+        final_prompt = (
+            f"{self.name}, {self.locations}, {self.actions}, {style}"
+        )
+        
+        return final_prompt
+    
+trump = PersonSelection(
+    name="Donald Trump",
+    locatii=["at the White House", "on a podium", "on stage", "at the Resolute Desk", "White House Garden"],
+    actiuni=["looks at camera", "speaks at a microphone", "waves to crowd", "smiles gently", "looks serious", "shakes hands with someone"]
+)
 
-print("Gata sefu! Dataset creat.")
+list_persons = [trump]
+
+for person in list_persons:
+    
+    print(f"Image generation for {person}...")
+    
+    for i in range(0, TOTAL_IMAGES, BATCH_SIZE):
+    
+    
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    
+        current_prompts = []
+        for _ in range(BATCH_SIZE):
+            ppl = random.choice(people)
+            loc = random.choice(locations)
+            act = random.choice(actions)
+            style = random.choice(styles)
+            current_prompts.append(person.get_prompt())
+    
+        print(f"Generare batch {i} - {i+BATCH_SIZE}...")
+
+    
+    
+        images = pipe(
+            current_prompts,  
+            height=1024,
+            width=1024,
+            guidance_scale=3.5, 
+            num_inference_steps=35, 
+            max_sequence_length=512,
+            generator=torch.Generator("cuda").manual_seed(random.randint(0, 1000000))
+        ).images
+    
+    
+        for idx, img in enumerate(images):
+            file_index = i + idx
+            if file_index >= TOTAL_IMAGES: break 
+        
+            filename = output_dir / f"flux_gen_{file_index}.jpg"
+            img.save(filename)
+            print(f"  -> Salvat: {filename}")
