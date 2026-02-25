@@ -173,10 +173,16 @@ kim_kardashian = PersonSelection(
     actiuni=["taking a mirror selfie with a smartphone", "wearing a skin-tight designer gown", "striking a glamorous pose for paparazzi", "adjusting her sunglasses while holding a designer bag"]
 )
 
+barack_obama = PersonSelection(
+    name="Barack Obama",
+    locatii=["at the White House Rose Garden", "on a large campaign stage with a blue background", "in the Oval Office", "at a town hall meeting"],
+    actiuni=["smiling warmly and waving to the crowd", "speaking passionately with rolled-up shirt sleeves", "making his signature thumb-to-finger hand gesture", "wearing a sharp tailored suit and blue tie"]
+)
+
 list_persons = [trump, macron, xi_jinping, putin, zelensky, netanyahu,
     elon_musk, jeffrey_epstein, lebron_james, kanye_west, 
     taylor_swift, tom_cruise, will_smith, morgan_freeman, 
-    sydney_sweeney, charlie_kirk, albert_einstein, mr_beast, kim_jong_un, kim_kardashian
+    sydney_sweeney, charlie_kirk, albert_einstein, mr_beast, kim_jong_un, kim_kardashian, barack_obama
 ]
 
 for person in list_persons:
