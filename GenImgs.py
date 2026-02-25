@@ -19,7 +19,7 @@ login(token=os.getenv("tokenhg"))
 
 model_id = "black-forest-labs/FLUX.2-dev"
 
-print("🚀 Incarc FLUX.2-dev...")
+print("Incarc FLUX.2-dev...")
 pipe = FluxPipeline.from_pretrained(
     model_id,
     torch_dtype=torch.bfloat16
