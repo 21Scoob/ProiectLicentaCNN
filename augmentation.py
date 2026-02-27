@@ -4,7 +4,7 @@ from PIL import Image, ImageEnhance
 from tqdm import tqdm 
 
 
-FOLDER_PATH = r"/Volumes/SSD1/KimKardashian_Scraped" 
+FOLDER_PATH = r"/Volumes/SSD1/Charlie_Kirk_Scraped" 
 TARGET_COUNT = 2500 
 VALID_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 

@@ -11,9 +11,9 @@ from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 
-BASE_URL = "https://www.gettyimages.com/search/2/image?groupbyevent=false&family=editorial&phrase=xi%20jinping&sort=mostpopular&specificpeople=2598986"
+BASE_URL = "https://www.gettyimages.com/search/2/image?groupbyevent=false&family=editorial&phrase=charlie%20kirk&sort=mostpopular&specificpeople=26969689"
 URL_PATTERN = "&page={}"
-OUTPUT_DIR = "/Volumes/SSD1/Xijinping_Scraped" 
+OUTPUT_DIR = "/Volumes/SSD1/Charlie_Kirk_Scraped" 
 TARGET_LIMIT = 2500  
 
 
