@@ -1,4 +1,4 @@
-# --- AI & Procesare Imagini ---
+
 torch
 torchvision
 numpy
@@ -14,16 +14,11 @@ google
 icrawler 
 face_recognition 
 opencv-python
-
-# --- Interfața Web (Frontend) ---
 streamlit
-
-# --- Baza de date (Backend) ---
 psycopg2-binary`
 SQLAlchemy
-
-# --- Utilitare & Grafice ---
 matplotlib
 seaborn
 python-dotenv
 tqdm
+pip-system-certs
