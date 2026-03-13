@@ -1,5 +1,5 @@
 import diffusers
-from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import vit_b_16,  ViT_B_16_Weights 
 import torch
 import torchvision
 from torchvision import models, datasets
@@ -8,14 +8,13 @@ import torch.nn as nn
 import time 
 from torch.optim import Adam
 
-# Data Augmentation for training, validation and test proccess
 
 image_transforms = {
     'train': transforms_v2.Compose([
-        transforms_v2.RandomResizedCrop(size=256, scale=(0.8,1)),
+        transforms_v2.RandomResizedCrop(size=400, scale=(0.8,1)),
         transforms_v2.RandomRotation(degrees=15),
         transforms_v2.RandomHorizontalFlip(),
-        transforms_v2.CenterCrop(size=224),
+        transforms_v2.CenterCrop(size=384),
         transforms_v2.ToImage(),
         transforms_v2.ToDtype(torch.float32, scale=True),
         transforms_v2.Normalize(mean=[0.485,0.456,0.406],
@@ -23,8 +22,8 @@ image_transforms = {
     ]),
         
     'valid': transforms_v2.Compose([
-        transforms_v2.Resize(size=256),
-        transforms_v2.CenterCrop(size=224),
+        transforms_v2.Resize(size=400),
+        transforms_v2.CenterCrop(size=384),
         transforms_v2.ToImage(),
         transforms_v2.ToDtype(torch.float32, scale=True),
         transforms_v2.Normalize(mean=[0.485,0.456,0.406],
@@ -32,8 +31,8 @@ image_transforms = {
     ]),
     
     'test': transforms_v2.Compose([
-        transforms_v2.Resize(size=256), 
-        transforms_v2.CenterCrop(size=224),
+        transforms_v2.Resize(size=400), 
+        transforms_v2.CenterCrop(size=384),
         transforms_v2.ToImage(),
         transforms_v2.ToDtype(torch.float32, scale=True),
         transforms_v2.Normalize(mean=[0.485,0.456,0.406],
@@ -60,26 +59,26 @@ image_loaders = {
 # Setting up the model
 
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-weights = models.ResNet50_Weights.IMAGENET1K_V1
-model = models.resnet50(weights=weights).to(device)
+weights = models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1
+model = models.vit_b_16(weights=weights).to(device)
 
 for param in model.parameters():
     
     param.requires_grad = False
     
-fc_inputs = model.fc.in_features
+heads_inputs = model.heads.head.in_features
 
-model.fc = nn.Sequential(
-    nn.Linear(fc_inputs, 256),
+model.heads = nn.Sequential(
+    nn.Linear(heads_inputs, 400),
     nn.ReLU(),
     nn.Dropout(0.45),
-    nn.Linear(256, 2)
+    nn.Linear(400, 2)
 )
 
 model.to(device)
 
 loss_func = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.fc.parameters())
+optimizer = torch.optim.Adam(model.heads.parameters())
 epochs=32
 
 def train_model(model, loss_func, optimizer, epochs):
