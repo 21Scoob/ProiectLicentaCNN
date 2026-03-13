@@ -21,6 +21,8 @@ for person in subfolders:
     train = int(total_files * 0.8)
     val = train + int(total_files* 0.1)
     
+    print((train, val))
+    
     train_files = files[:train]
     valid_files = files[train:val]
     test_files = files[val:]
