@@ -15,7 +15,7 @@ icrawler
 face_recognition 
 opencv-python
 streamlit
-psycopg2-binary`
+psycopg2-binary
 SQLAlchemy
 matplotlib
 seaborn

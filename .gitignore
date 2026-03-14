@@ -13,3 +13,7 @@ find-image-models.py
 *env
 
 asda.py
+
+.python-version
+
+pyproject.toml
