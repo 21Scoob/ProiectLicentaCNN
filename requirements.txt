@@ -1,4 +1,3 @@
-
 torch
 torchvision
 numpy
@@ -22,3 +21,9 @@ seaborn
 python-dotenv
 tqdm
 pip-system-certs
+supabase
+fastapi 
+uvicorn 
+sqlalchemy 
+passlib 
+python-multipart

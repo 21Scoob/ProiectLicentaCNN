@@ -16,4 +16,12 @@ asda.py
 
 .python-version
 
-pyproject.toml
+pyproject.tomls
+
+.streamlit
+
+licenta.db
+
+uv.lock
+
+__pycache__
