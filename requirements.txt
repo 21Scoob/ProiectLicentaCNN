@@ -27,3 +27,8 @@ uvicorn
 sqlalchemy 
 passlib 
 python-multipart
+python-jose[cryptography]
+streamlit
+requests
+bcrypt
+extra-streamlit-components
