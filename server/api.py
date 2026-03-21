@@ -231,3 +231,25 @@ def upgrade_plan(email: str, plan_name: str, db: Session = Depends(get_db)):
     user.credits += plan.monthly_credits
     db.commit()
     return {"new_credits": user.credits}
+
+class FeedbackSchema(BaseModel):
+    scan_id: Optional[int] = None
+    email: str
+    is_correct: bool
+    comment: Optional[str] = None
+
+@app.post("/feedback/")
+def submit_feedback(feedback: FeedbackSchema, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == feedback.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User negăsit")
+    
+    new_feedback = UserFeedback(
+        user_id=user.id,
+        scan_id=feedback.scan_id,
+        is_correct=feedback.is_correct,
+        comment=feedback.comment
+    )
+    db.add(new_feedback)
+    db.commit()
+    return {"status": "success", "message": "Feedback salvat"}
