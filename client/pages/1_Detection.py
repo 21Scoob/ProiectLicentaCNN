@@ -3,7 +3,18 @@ import requests
 from extra_streamlit_components import CookieManager
 from utils import init_session, handle_auth, render_sidebar, require_auth, API_URL
 
-st.set_page_config(page_title="Detecție Deepfake", page_icon="🔍")
+st.set_page_config(page_title="Deepfake Detection")
+
+st.markdown("""
+    <style>
+        [data-testid="stFileUploader"] section button {
+            display: none;
+        }
+        [data-testid="stFileUploader"] section {
+            padding: 40px !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 cookie_manager = CookieManager()
 init_session()
@@ -11,7 +22,6 @@ handle_auth(cookie_manager)
 render_sidebar(cookie_manager)
 require_auth()
 
-# --- CONTINUT PAGINA ---
 st.title("Sistem de Detecție Deepfake")
 st.markdown("---")
 
@@ -21,24 +31,17 @@ uploaded_file = st.file_uploader("Alege o imagine...", type=["jpg", "jpeg", "png
 if uploaded_file is not None:
     st.image(uploaded_file, caption='Imagine încărcată.', use_container_width=True)
     
-    if st.button("Inițiază Scanarea", type="primary"):
+    if st.button("Inițiază Scanarea", type="primary", use_container_width=True):
         if st.session_state['credits'] > 0:
             with st.spinner('Modelele ResNet50 și ViT analizează imaginea...'):
-                # Aici va veni apelul real catre API-ul de predictie
-                # Deocamdata simulam un rezultat pentru a demonstra feedback-ul
                 import time
                 time.sleep(2) 
-                
-                prediction_val = 87.5  # Exemplu: 87.5% probabilitate de Deepfake
+                prediction_val = 87.5  
                 st.session_state['last_prediction'] = prediction_val
                 st.session_state['show_feedback'] = True
-                
-                # Scadem un credit (simulat pana la integrarea completa)
-                # st.session_state['credits'] -= 1 
         else:
             st.error("Nu mai ai credite suficiente! Te rugăm să reîncarci contul.")
 
-# --- SECTIUNE REZULTAT SI FEEDBACK ---
 if 'last_prediction' in st.session_state:
     val = st.session_state['last_prediction']
     
@@ -55,7 +58,6 @@ if 'last_prediction' in st.session_state:
             st.success(f"Probabilitate Deepfake: **{val}%**")
             st.info("Imaginea pare a fi autentică conform analizei noastre.")
 
-    # Logica de Feedback (Sugestia 3)
     if st.session_state.get('show_feedback'):
         st.write("---")
         st.markdown("##### 📢 Ajută-ne să ne îmbunătățim!")

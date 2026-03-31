@@ -7,19 +7,26 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from typing import Optional
+from dotenv import load_dotenv
+import os
+import stripe
 
-# Configurație JWT
-SECRET_KEY = "super-secret-key-pentru-licenta" # Schimbă-l cu ceva complex în producție
+load_dotenv("/Users/21scoob/Desktop/Code/ProiectLicentaCNN/.env")
+
+SECRET_KEY = os.getenv('SECRETKEYFORAPI')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+stripe.api_key = STRIPE_SECRET_KEY
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 zile
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./licenta.db"
+app = FastAPI(title="Deepfake API")
+
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-# --- MODELE DATABASE ---
 
 class SubscriptionPlan(Base):
     __tablename__ = "subscription_plans"
@@ -70,7 +77,7 @@ class Scan(Base):
     owner = relationship("User", back_populates="scans")
     model = relationship("ModelMetadata", back_populates="scans")
     feedback = relationship("UserFeedback", back_populates="scan", uselist=False)
-    
+
 class AuthToken(Base):
     __tablename__ = "auth_tokens"
     id = Column(Integer, primary_key=True, index=True)
@@ -105,8 +112,6 @@ class UserFeedback(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# --- UTILS ---
-
 def hash_password(password: str) -> str:
     pwd_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt()
@@ -125,16 +130,55 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# --- API ---
 
-app = FastAPI(title="Deepfake API")
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
-        db.close()
+        db.close()     
+        
+@app.post("/create-checkout-session/")
+def create_checkout_session(email: str, amount: int, price_eur: float, db: Session = Depends(get_db)):
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if not user: raise HTTPException(status_code=404, detail="User not found")
+        
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'eur',
+                    'product_data': {'name': f'{amount} Credite Deepfake Detection'},
+                    'unit_amount': int(price_eur * 100),
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=f"http://localhost:8501/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
+            cancel_url="http://localhost:8501/Credits?canceled=true",
+            customer_email=email,
+            metadata={"amount": amount, "user_email": email}
+        )
+        return {"url": checkout_session.url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/verify-payment/")
+def verify_payment(session_id: str, email: str, amount: int, db: Session = Depends(get_db)):
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        if session.payment_status == 'paid':
+            user = db.query(User).filter(User.email == email).first()
+            if user:
+                user.credits += amount
+                db.add(Transaction(user_id=user.id, amount=amount, transaction_type="PURCHASE", description=f"Stripe: {amount} credite"))
+                db.commit()
+                return {"status": "success", "new_credits": user.credits}
+        return {"status": "failed"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.on_event("startup")
 def startup_event():
@@ -153,15 +197,13 @@ def startup_event():
     finally:
         db.close()
 
-# --- ENDPOINTS ---
-
 @app.post("/register/")
 def register_user(email: str, password: str, username: str, db: Session = Depends(get_db)):
     email_clean = email.strip().lower()
     username_clean = username.strip()
     
     if db.query(User).filter((User.email == email_clean) | (User.username == username_clean)).first():
-        raise HTTPException(status_code=400, detail="Email sau Username deja folosit.")
+        raise HTTPException(status_code=400, detail="Email or Username already taken")
     
     free_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == "Free").first()
     new_user = User(
@@ -174,11 +216,20 @@ def register_user(email: str, password: str, username: str, db: Session = Depend
     db.commit()
     db.refresh(new_user)
     
-    db.add(Transaction(user_id=new_user.id, amount=10, transaction_type="BONUS", description="Bun venit"))
+    db.add(Transaction(user_id=new_user.id, amount=10, transaction_type="BONUS", description="Welcome!"))
     db.commit()
     
     token = create_access_token(data={"sub": new_user.email})
-    return {"access_token": token, "token_type": "bearer", "user": {"email": new_user.email, "username": new_user.username, "credits": new_user.credits}}
+    return {
+        "access_token": token, 
+        "token_type": "bearer", 
+        "user": {
+            "email": new_user.email, 
+            "username": new_user.username, 
+            "credits": new_user.credits,
+            "plan": new_user.plan.name if new_user.plan else "Free"
+        }
+    }
 
 class UserCredentials(BaseModel):
     email: str
@@ -188,10 +239,19 @@ class UserCredentials(BaseModel):
 def login_user(credentials: UserCredentials, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email.strip().lower()).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Date incorecte")
+        raise HTTPException(status_code=400, detail="Incorrect Data")
     
     token = create_access_token(data={"sub": user.email})
-    return {"access_token": token, "token_type": "bearer", "user": {"email": user.email, "username": user.username, "credits": user.credits}}
+    return {
+        "access_token": token, 
+        "token_type": "bearer", 
+        "user": {
+            "email": user.email, 
+            "username": user.username, 
+            "credits": user.credits,
+            "plan": user.plan.name if user.plan else "Free"
+        }
+    }
 
 @app.get("/validate-token/")
 def validate_token(token: str, db: Session = Depends(get_db)):
@@ -205,9 +265,14 @@ def validate_token(token: str, db: Session = Depends(get_db)):
     
     user = db.query(User).filter(User.email == email).first()
     if user is None:
-        raise HTTPException(status_code=401, detail="Utilizator inexistent")
+        raise HTTPException(status_code=401, detail="Nonexistent User")
     
-    return {"email": user.email, "username": user.username, "credits": user.credits}
+    return {
+        "email": user.email, 
+        "username": user.username, 
+        "credits": user.credits,
+        "plan": user.plan.name if user.plan else "Free"
+    }
 
 @app.get("/plans/")
 def get_plans(db: Session = Depends(get_db)):
@@ -216,7 +281,7 @@ def get_plans(db: Session = Depends(get_db)):
 @app.post("/add-credits/")
 def add_credits(email: str, amount: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
-    if not user: raise HTTPException(status_code=404, detail="User negăsit")
+    if not user: raise HTTPException(status_code=404, detail="Uknown User")
     user.credits += amount
     db.add(Transaction(user_id=user.id, amount=amount, transaction_type="PURCHASE", description=f"Plus {amount}"))
     db.commit()
@@ -226,7 +291,7 @@ def add_credits(email: str, amount: int, db: Session = Depends(get_db)):
 def upgrade_plan(email: str, plan_name: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan_name).first()
-    if not user or not plan: raise HTTPException(status_code=404, detail="Eroare")
+    if not user or not plan: raise HTTPException(status_code=404, detail="Error")
     user.plan_id = plan.id
     user.credits += plan.monthly_credits
     db.commit()
@@ -242,7 +307,7 @@ class FeedbackSchema(BaseModel):
 def submit_feedback(feedback: FeedbackSchema, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == feedback.email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User negăsit")
+        raise HTTPException(status_code=404, detail="Unknown User")
     
     new_feedback = UserFeedback(
         user_id=user.id,
@@ -252,4 +317,4 @@ def submit_feedback(feedback: FeedbackSchema, db: Session = Depends(get_db)):
     )
     db.add(new_feedback)
     db.commit()
-    return {"status": "success", "message": "Feedback salvat"}
+    return {"status": "success", "message": "Saved Feedback"}

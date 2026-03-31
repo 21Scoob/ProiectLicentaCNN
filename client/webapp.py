@@ -37,8 +37,8 @@ Ești pregătit? Ai nevoie de un cont pentru a putea iniția procesul de analiz�
 st.write("")
 
 if not st.session_state["user"]:
-    if st.button("Mergi la sistemul de Autentificare / Înregistrare", type="primary", use_container_width=True):
+    if st.button("Mergi la sistemul de Autentificare / Înregistrare", use_container_width=True):
         st.switch_page("pages/Authentification.py")
 else:
-    if st.button("Mergi la Detector", type="primary", use_container_width=True):
+    if st.button("Mergi la Detector",  use_container_width=True):
         st.switch_page("pages/1_Detection.py")

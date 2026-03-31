@@ -102,8 +102,6 @@ def train_model(model, loss_func, optimizer, epochs):
             running_corrects = 0.0
         
             for inputs, labels in image_loaders[phase]:
-                
-                print('process one lot')
             
                 inputs = inputs.to(device)
                 labels = labels.to(device)

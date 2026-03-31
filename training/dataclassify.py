@@ -1,6 +1,9 @@
 import os
 import shutil
 import random
+from dotenv import load_dotenv, dotenv_values
+
+load_dotenv()
 
 folder = r"/Volumes/SSD1/Real"
 

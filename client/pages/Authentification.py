@@ -5,14 +5,13 @@ from datetime import datetime, timedelta
 import time
 from utils import init_session, handle_auth, render_sidebar, API_URL
 
-st.set_page_config(page_title="Autentificare", page_icon="🔒")
+st.set_page_config(page_title="Autentificare")
 
 cookie_manager = CookieManager()
 init_session()
 handle_auth(cookie_manager)
 render_sidebar(cookie_manager)
 
-# --- CONTINUT PAGINA ---
 st.title("Sistem de Detecție Deepfake")
 
 if st.session_state['user'] is None:
@@ -22,7 +21,7 @@ if st.session_state['user'] is None:
         email_login = st.text_input("Email", key="login_email").strip().lower()
         pass_login = st.text_input("Password", type="password", key="login_pass")
         
-        if st.button("Login", type="primary", use_container_width=True):
+        if st.button("Login", use_container_width=True):
             try:
                 response = requests.post(f"{API_URL}/login/", json={"email": email_login, "password": pass_login})
                 if response.status_code == 200:
@@ -35,20 +34,20 @@ if st.session_state['user'] is None:
                     expiry = datetime.now() + timedelta(days=7)
                     cookie_manager.set("auth_token", data['access_token'], expires_at=expiry)
                     
-                    st.success("Logare reușită!")
+                    st.success("Succesful Login")
                     time.sleep(0.5)
                     st.switch_page("pages/1_Detection.py")
                 else:
-                    st.error("Email sau parolă incorectă!")
+                    st.error("Incorrect Email or password!")
             except:
-                st.error("Eroare la conectarea cu serverul.")
+                st.error("Error connecting to the server.")
                 
     with tab_register:
-        user_reg = st.text_input("Nume Utilizator", key="reg_user")
+        user_reg = st.text_input("Username", key="reg_user")
         email_reg = st.text_input("Email", key="reg_email").strip().lower()
         pass_reg = st.text_input("Password", type="password", key="reg_pass")
         
-        if st.button("Register", type="primary", use_container_width=True):
+        if st.button("Register",use_container_width=True):
             try:
                 response = requests.post(f"{API_URL}/register/?email={email_reg}&password={pass_reg}&username={user_reg}")
                 if response.status_code == 200:
@@ -58,14 +57,14 @@ if st.session_state['user'] is None:
                     expiry = datetime.now() + timedelta(days=7)
                     cookie_manager.set("auth_token", data['access_token'], expires_at=expiry)
                     
-                    st.success("Cont creat cu succes!")
+                    st.success("Account created with success!")
                     time.sleep(0.5)
                     st.switch_page("pages/1_Detection.py")
                 else:
                     st.error(response.json().get("detail", "Eroare la înregistrare"))
             except:
-                st.error("Eroare la conectarea cu serverul.")
+                st.error("Error connecting to the server.")
 else:
-    st.success(f"Ești deja conectat ca {st.session_state['username']}!")
-    if st.button("Mergi la Detector", use_container_width=True):
+    st.success(f"You are already connected as {st.session_state['username']}!")
+    if st.button("Go to detector", use_container_width=True):
         st.switch_page("pages/1_Detection.py")

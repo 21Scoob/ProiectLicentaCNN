@@ -18,8 +18,7 @@ def init_session():
             st.session_state[key] = value
 
 def handle_auth(cookie_manager):
-    """Logica de auto-login folosind JWT din cookie-uri"""
-    # Așteptăm puțin ca managerul de cookie să fie gata
+    """Auto-Login logic"""
     time.sleep(0.1) 
     jwt_token = cookie_manager.get("auth_token")
 
@@ -32,24 +31,72 @@ def handle_auth(cookie_manager):
                 st.session_state["username"] = user_data["username"]
                 st.session_state["credits"] = user_data["credits"]
                 st.session_state["auth_token"] = jwt_token
-                st.rerun()
         except Exception:
             pass
     return jwt_token
 
 def render_sidebar(cookie_manager):
-    """Randare sidebar consistent si stilizat"""
-    # Ascunde navigatia implicita Streamlit
     st.markdown("""
         <style>
             [data-testid="stSidebarNav"] { display: none; }
+            
+            /* --- STIL SIDEBAR (MINIMALIST) --- */
             .sidebar-user-card {
-                background-color: #B843C4; 
+                background-color: transparent; 
                 padding: 15px; 
                 border-radius: 10px; 
                 color: white; 
                 margin-bottom: 20px; 
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+
+            /* Butoane Navigare: Transparente, Text Alb, Fara Hover */
+            [data-testid="stSidebar"] div.stButton > button {
+                background-color: transparent !important;
+                color: white !important;
+                border: none !important;
+                min-height: 0px !important;
+                height: auto !important;
+                padding: 10px !important;
+                width: 100% !important;
+                text-align: left !important;
+                justify-content: flex-start !important;
+                transition: none !important; /* Elimina tranzitiile */
+            }
+
+            /* Elimina orice efect la hover pentru navigare */
+            [data-testid="stSidebar"] div.stButton > button:hover,
+            [data-testid="stSidebar"] div.stButton > button:active,
+            [data-testid="stSidebar"] div.stButton > button:focus {
+                background-color: transparent !important;
+                color: white !important;
+                border: none !important;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+                transform: none !important;
+            }
+
+            /* --- STIL CARDURI INTERACTIVE (ZONA PRINCIPALA) --- */
+            [data-testid="stMainBlockContainer"] div.stButton > button {
+                width: 100% !important;
+                min-height: 45px !important;
+                background-color:  transparent !important;
+                color: white !important;
+                padding: 25px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: center !important;
+                text-align: center !important;
+                white-space: pre-wrap !important;
+                transition: all 0.3s ease !important;
+                line-height: 1.6 !important;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.05) !important;
+            }
+
+            [data-testid="stMainBlockContainer"] div.stButton > button:hover {
+         
+                background-color: transparent !important;
+                transform: translateY(-5px) !important;
+                box-shadow: 0 12px 24px rgba(49, 27, 146, 0.15) !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -62,40 +109,43 @@ def render_sidebar(cookie_manager):
                     <p style="margin: 2px 0 0 0; font-size: 0.8em; opacity: 0.8;">{st.session_state['user']}</p>
                     <hr style="margin: 10px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.3);">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold;">💰 Credite:</span>
+                        <span style="font-weight: bold;">Credits:</span>
                         <span style="font-size: 1.2em; font-weight: bold;">{st.session_state['credits']}</span>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
         
-        st.write("### Navigare")
-        if st.button("🏠 Acasă", use_container_width=True):
+        st.write("### Nav")
+        if st.button("Home", key="nav_home", use_container_width=True):
             st.switch_page("webapp.py")
         
         if not st.session_state["user"]:
-            if st.button("🔒 Autentificare", use_container_width=True):
+            if st.button("Authentication", key="nav_auth", use_container_width=True):
                 st.switch_page("pages/Authentification.py")
         else:
-            if st.button("🔍 Detecție", use_container_width=True):
+            if st.button("Detection", key="nav_det", use_container_width=True):
                 st.switch_page("pages/1_Detection.py")
-            if st.button("💰 Credite", use_container_width=True):
+            if st.button("Credits", key="nav_cred", use_container_width=True):
                 st.switch_page("pages/2_Credits.py")
-            if st.button("💳 Abonamente", use_container_width=True):
+            if st.button("Subscriptions", key="nav_sub", use_container_width=True):
                 st.switch_page("pages/3_Subscription.py")
             
             st.write("---")
-            if st.button("Deconectare", use_container_width=True):
-                cookie_manager.delete("auth_token")
+            if st.button("Logout", key="nav_logout", use_container_width=True):
+                try:
+                    cookie_manager.delete("auth_token")
+                except (KeyError, Exception):
+                    pass
                 st.session_state["user"] = None
                 st.session_state["username"] = None
                 st.session_state["credits"] = 0
                 st.session_state["auth_token"] = None
-                st.rerun()
+                st.switch_page("pages/Authentification.py")
 
 def require_auth():
     """Blocheaza accesul paginii daca userul nu e logat"""
     if st.session_state['user'] is None:
-        st.warning("Te rugăm să te autentifici pentru a accesa această pagină.")
-        if st.button("Mergi la Autentificare"):
+        st.warning("Please go and authenticate to continue on this page.")
+        if st.button("Go to Authentication", key="req_auth_btn"):
             st.switch_page("pages/Authentification.py")
         st.stop()

@@ -7,7 +7,9 @@ import torchvision.transforms.v2 as transforms_v2
 import torch.nn as nn
 import time 
 from torch.optim import Adam
+from dotenv import load_dotenv, dotenv_values
 
+load_dotenv()
 
 image_transforms = {
     'train': transforms_v2.Compose([

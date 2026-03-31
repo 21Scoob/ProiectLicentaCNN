@@ -32,3 +32,4 @@ streamlit
 requests
 bcrypt
 extra-streamlit-components
+stripe
