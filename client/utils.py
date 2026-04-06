@@ -3,6 +3,7 @@ import requests
 import time
 from datetime import datetime, timedelta
 
+
 API_URL = "http://localhost:8000"
 
 def init_session():
@@ -11,7 +12,8 @@ def init_session():
         "user": None,
         "username": None,
         "credits": 0,
-        "auth_token": None
+        "auth_token": None,
+        "logout_in_progress": False
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -19,6 +21,9 @@ def init_session():
 
 def handle_auth(cookie_manager):
     """Auto-Login logic"""
+    if st.session_state.get("logout_in_progress"):                                              
+      st.session_state["logout_in_progress"] = False                              
+      return None 
     time.sleep(0.1) 
     jwt_token = cookie_manager.get("auth_token")
 
@@ -140,6 +145,8 @@ def render_sidebar(cookie_manager):
                 st.session_state["username"] = None
                 st.session_state["credits"] = 0
                 st.session_state["auth_token"] = None
+                st.session_state["logout_in_progress"] = True
+                time.sleep(0.5)
                 st.switch_page("pages/Authentification.py")
 
 def require_auth():

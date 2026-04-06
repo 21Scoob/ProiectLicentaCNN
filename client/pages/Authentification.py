@@ -5,14 +5,14 @@ from datetime import datetime, timedelta
 import time
 from utils import init_session, handle_auth, render_sidebar, API_URL
 
-st.set_page_config(page_title="Autentificare")
+st.set_page_config(page_title="Authentication")
 
 cookie_manager = CookieManager()
 init_session()
 handle_auth(cookie_manager)
 render_sidebar(cookie_manager)
 
-st.title("Sistem de Detecție Deepfake")
+st.title("Deepfake Detection System")
 
 if st.session_state['user'] is None:
     tab_login, tab_register = st.tabs(["Login", "Register"])

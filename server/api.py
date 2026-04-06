@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
@@ -10,6 +10,10 @@ from typing import Optional
 from dotenv import load_dotenv
 import os
 import stripe
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqladmin import Admin, ModelView
 
 load_dotenv("/Users/21scoob/Desktop/Code/ProiectLicentaCNN/.env")
 
@@ -23,10 +27,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 SQLALCHEMY_DATABASE_URL = "sqlite:///./licenta.db"
 app = FastAPI(title="Deepfake API")
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+admin = Admin(app, engine)
 
 class SubscriptionPlan(Base):
     __tablename__ = "subscription_plans"
@@ -109,6 +118,15 @@ class UserFeedback(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     scan = relationship("Scan", back_populates="feedback")
     owner = relationship("User", back_populates="feedbacks")
+    
+class UserAdmin(ModelView, model=User):
+    column_list = [User.id, User.email, User.username, User.role, User.credits]
+    can_edit = True
+    can_delete = True
+    can_create = True
+    can_export = True
+    
+admin.add_view(UserAdmin)
 
 Base.metadata.create_all(bind=engine)
 
@@ -140,7 +158,8 @@ def get_db():
         db.close()     
         
 @app.post("/create-checkout-session/")
-def create_checkout_session(email: str, amount: int, price_eur: float, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def create_checkout_session(request:Request, email: str, amount: int, price_eur: float, db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.email == email).first()
         if not user: raise HTTPException(status_code=404, detail="User not found")
@@ -150,7 +169,7 @@ def create_checkout_session(email: str, amount: int, price_eur: float, db: Sessi
             line_items=[{
                 'price_data': {
                     'currency': 'eur',
-                    'product_data': {'name': f'{amount} Credite Deepfake Detection'},
+                    'product_data': {'name': f'{amount} Credits Deepfake Detection'},
                     'unit_amount': int(price_eur * 100),
                 },
                 'quantity': 1,
@@ -166,7 +185,8 @@ def create_checkout_session(email: str, amount: int, price_eur: float, db: Sessi
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/verify-payment/")
-def verify_payment(session_id: str, email: str, amount: int, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def verify_payment(request:Request, session_id: str, email: str, amount: int, db: Session = Depends(get_db)):
     try:
         session = stripe.checkout.Session.retrieve(session_id)
         if session.payment_status == 'paid':
@@ -198,7 +218,8 @@ def startup_event():
         db.close()
 
 @app.post("/register/")
-def register_user(email: str, password: str, username: str, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register_user(request:Request, email: str, password: str, username: str, db: Session = Depends(get_db)):
     email_clean = email.strip().lower()
     username_clean = username.strip()
     
@@ -236,7 +257,8 @@ class UserCredentials(BaseModel):
     password: str
 
 @app.post("/login/")
-def login_user(credentials: UserCredentials, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def login_user(request:Request, credentials: UserCredentials, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email.strip().lower()).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect Data")
@@ -254,7 +276,8 @@ def login_user(credentials: UserCredentials, db: Session = Depends(get_db)):
     }
 
 @app.get("/validate-token/")
-def validate_token(token: str, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def validate_token(request:Request, token: str, db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
@@ -275,11 +298,13 @@ def validate_token(token: str, db: Session = Depends(get_db)):
     }
 
 @app.get("/plans/")
-def get_plans(db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def get_plans(request:Request, db: Session = Depends(get_db)):
     return db.query(SubscriptionPlan).all()
 
 @app.post("/add-credits/")
-def add_credits(email: str, amount: int, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def add_credits(request:Request, email: str, amount: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user: raise HTTPException(status_code=404, detail="Uknown User")
     user.credits += amount
@@ -288,7 +313,8 @@ def add_credits(email: str, amount: int, db: Session = Depends(get_db)):
     return {"new_credits": user.credits}
 
 @app.post("/upgrade-plan/")
-def upgrade_plan(email: str, plan_name: str, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def upgrade_plan(request:Request, email: str, plan_name: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan_name).first()
     if not user or not plan: raise HTTPException(status_code=404, detail="Error")
@@ -304,7 +330,8 @@ class FeedbackSchema(BaseModel):
     comment: Optional[str] = None
 
 @app.post("/feedback/")
-def submit_feedback(feedback: FeedbackSchema, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def submit_feedback(request:Request, feedback: FeedbackSchema, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == feedback.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Unknown User")

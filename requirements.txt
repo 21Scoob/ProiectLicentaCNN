@@ -33,3 +33,4 @@ requests
 bcrypt
 extra-streamlit-components
 stripe
+slowapi

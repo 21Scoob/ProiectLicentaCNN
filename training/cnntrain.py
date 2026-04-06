@@ -1,5 +1,5 @@
 import diffusers
-from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import regnet_y_128gf, RegNet_Y_128GF_Weights
 import torch
 import torchvision
 from torchvision import models, datasets
@@ -60,8 +60,8 @@ image_loaders = {
 # Setting up the model
 
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-weights = models.ResNet50_Weights.IMAGENET1K_V1
-model = models.resnet50(weights=weights).to(device)
+weights = models.RegNet_Y_128GF_Weights.IMAGENET1K_SWAG_E2E_V1
+model = models.regnet_y_128gf(weights=weights).to(device)
 
 for param in model.parameters():
     
@@ -131,3 +131,7 @@ def train_model(model, loss_func, optimizer, epochs):
 if __name__ == '__main__':
     
     train_model(model, loss_func, optimizer, epochs)
+    
+    file_name = 'vitdeepfake.pth'
+    
+    torch.save(train_model.state_dict(), file_name)

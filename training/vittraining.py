@@ -1,5 +1,5 @@
 import diffusers
-from torchvision.models import vit_b_16,  ViT_B_16_Weights 
+from torchvision.models import vit_l_16, ViT_L_16_Weights
 import torch
 import torchvision
 from torchvision import models, datasets
@@ -61,8 +61,8 @@ image_loaders = {
 # Setting up the model
 
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-weights = models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1
-model = models.vit_b_16(weights=weights).to(device)
+weights = models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1
+model = models.vit_l_16(weights=weights).to(device)
 
 for param in model.parameters():
     
@@ -134,3 +134,7 @@ def train_model(model, loss_func, optimizer, epochs):
 if __name__ == '__main__':
     
     train_model(model, loss_func, optimizer, epochs)
+    
+    file_name = 'cnndeepfake.pth'
+    
+    torch.save(train_model.state_dict(), file_name)
