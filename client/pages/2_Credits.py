@@ -54,12 +54,12 @@ for i, pkg in enumerate(credit_packages):
         
         if st.button(f"Cumpără {pkg['amount']}", key=f"buy_{pkg['amount']}", use_container_width=True):
             try:
-                payload = {
-                    "email": st.session_state['user'],
+                headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
+                params = {
                     "amount": pkg['amount'],
                     "price_eur": pkg['price']
                 }
-                response = requests.post(f"{API_URL}/create-checkout-session/", params=payload)
+                response = requests.post(f"{API_URL}/create-checkout-session/", params=params, headers=headers)
                 if response.status_code == 200:
                     checkout_url = response.json().get("url")
                     st.info("Te redirecționăm către Stripe...")
@@ -70,3 +70,4 @@ for i, pkg in enumerate(credit_packages):
                     st.error("Eroare la generarea sesiunii de plată.")
             except Exception as e:
                 st.error(f"Eroare de conexiune: {e}")
+

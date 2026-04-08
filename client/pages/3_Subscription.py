@@ -40,7 +40,8 @@ if all_plans:
                 label = f"{plan['name']}\n\n{plan['price']} €\n\n✅ {plan['monthly_credits']} Credite\n\nAlege Plan"
                 if st.button(label, key=f"btn_{plan['name']}", use_container_width=True):
                     try:
-                        up_res = requests.post(f"{API_URL}/upgrade-plan/?email={st.session_state['user']}&plan_name={plan['name']}")
+                        headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
+                        up_res = requests.post(f"{API_URL}/upgrade-plan/?plan_name={plan['name']}", headers=headers)
                         if up_res.status_code == 200:
                             st.session_state['credits'] = up_res.json()['new_credits']
                             st.session_state['plan'] = plan['name']

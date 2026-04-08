@@ -34,20 +34,33 @@ if uploaded_file is not None:
     if st.button("Inițiază Scanarea", type="primary", use_container_width=True):
         if st.session_state['credits'] > 0:
             with st.spinner('Modelele ResNet50 și ViT analizează imaginea...'):
-                import time
-                time.sleep(2) 
-                prediction_val = 87.5  
-                st.session_state['last_prediction'] = prediction_val
-                st.session_state['show_feedback'] = True
+                try:
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
+                    
+                    response = requests.post(f"{API_URL}/predict/", files=files, headers=headers)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        st.session_state['last_prediction'] = data['prediction']
+                        st.session_state['last_scan_id'] = data['scan_id']
+                        st.session_state['credits'] = data['new_credits']
+                        st.session_state['show_feedback'] = True
+                    elif response.status_code == 402:
+                        st.error("Nu mai ai credite suficiente!")
+                    else:
+                        st.error(f"Eroare la procesare: {response.text}")
+                except Exception as e:
+                    st.error(f"Eroare de conexiune: {e}")
         else:
             st.error("Nu mai ai credite suficiente! Te rugăm să reîncarci contul.")
 
 if 'last_prediction' in st.session_state:
     val = st.session_state['last_prediction']
+    scan_id = st.session_state.get('last_scan_id')
     
     st.markdown("---")
     st.subheader("Rezultatul Analizei")
-    
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -66,11 +79,12 @@ if 'last_prediction' in st.session_state:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("✅ Da, este corect", use_container_width=True):
+                headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
                 requests.post(f"{API_URL}/feedback/", json={
-                    "email": st.session_state['user'],
+                    "scan_id": scan_id,
                     "is_correct": True,
                     "comment": "User confirmed result"
-                })
+                }, headers=headers)
                 st.session_state['show_feedback'] = False
                 st.success("Mulțumim pentru feedback!")
                 st.rerun()
@@ -81,12 +95,14 @@ if 'last_prediction' in st.session_state:
         if st.session_state.get('feedback_negative'):
             comment = st.text_area("Spune-ne mai multe (opțional):", placeholder="Ex: Imaginea este reală, dar a fost detectată ca fake...")
             if st.button("Trimite Feedback Negativ"):
+                headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
                 requests.post(f"{API_URL}/feedback/", json={
-                    "email": st.session_state['user'],
+                    "scan_id": scan_id,
                     "is_correct": False,
                     "comment": comment
-                })
+                }, headers=headers)
                 st.session_state['show_feedback'] = False
                 st.session_state['feedback_negative'] = False
                 st.success("Mulțumim! Vom analiza această eroare.")
                 st.rerun()
+

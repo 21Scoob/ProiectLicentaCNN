@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter
+from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, File, UploadFile
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
@@ -118,7 +118,13 @@ class UserFeedback(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     scan = relationship("Scan", back_populates="feedback")
     owner = relationship("User", back_populates="feedbacks")
-    
+
+class ProcessedPayment(Base):
+    __tablename__ = "processed_payments"
+    id = Column(Integer, primary_key=True, index=True)
+    stripe_session_id = Column(String, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class UserAdmin(ModelView, model=User):
     column_list = [User.id, User.email, User.username, User.role, User.credits]
     can_edit = True
@@ -148,22 +154,37 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+from fastapi.security import OAuth2PasswordBearer
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
-        db.close()     
+        db.close()  
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Token")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid Token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid Token")
+    
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user   
         
 @app.post("/create-checkout-session/")
 @limiter.limit("5/minute")
-async def create_checkout_session(request:Request, email: str, amount: int, price_eur: float, db: Session = Depends(get_db)):
+async def create_checkout_session(request:Request, amount: int, price_eur: float, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user: raise HTTPException(status_code=404, detail="User not found")
-        
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -177,8 +198,8 @@ async def create_checkout_session(request:Request, email: str, amount: int, pric
             mode='payment',
             success_url=f"http://localhost:8501/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
             cancel_url="http://localhost:8501/Credits?canceled=true",
-            customer_email=email,
-            metadata={"amount": amount, "user_email": email}
+            customer_email=current_user.email,
+            metadata={"amount": amount, "user_email": current_user.email}
         )
         return {"url": checkout_session.url}
     except Exception as e:
@@ -186,19 +207,49 @@ async def create_checkout_session(request:Request, email: str, amount: int, pric
 
 @app.get("/verify-payment/")
 @limiter.limit("5/minute")
-async def verify_payment(request:Request, session_id: str, email: str, amount: int, db: Session = Depends(get_db)):
+async def verify_payment(request:Request, session_id: str, amount: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
+        already_processed = db.query(ProcessedPayment).filter(ProcessedPayment.stripe_session_id == session_id).first()
+        if already_processed:
+            return {"status": "already_processed", "new_credits": current_user.credits}
         session = stripe.checkout.Session.retrieve(session_id)
-        if session.payment_status == 'paid':
-            user = db.query(User).filter(User.email == email).first()
-            if user:
-                user.credits += amount
-                db.add(Transaction(user_id=user.id, amount=amount, transaction_type="PURCHASE", description=f"Stripe: {amount} credite"))
-                db.commit()
-                return {"status": "success", "new_credits": user.credits}
+        if session.payment_status == 'paid':            
+            current_user.credits += amount
+            db.add(Transaction(user_id=current_user.id, amount=amount, transaction_type="PURCHASE", description=f"Stripe: {amount} credite"))
+            db.add(ProcessedPayment(stripe_session_id=session_id))
+            db.commit()
+            return {"status": "success", "new_credits": current_user.credits}
         return {"status": "failed"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/predict/")
+@limiter.limit("10/minute")
+async def predict_image(request:Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.credits <= 0:
+        raise HTTPException(status_code=402, detail="Insufficient credits")
+    
+    current_user.credits -= 1
+    db.add(Transaction(user_id=current_user.id, amount=-1, transaction_type="SCAN", description=f"Scan: {file.filename}"))
+    
+    prediction_val = 87.5 
+    
+    new_scan = Scan(
+        user_id=current_user.id,
+        filename=file.filename,
+        file_path="simulated_path",
+        prediction="Deepfake" if prediction_val > 50 else "Real",
+        confidence=prediction_val
+    )
+    db.add(new_scan)
+    db.commit()
+    db.refresh(new_scan)
+    
+    return {
+        "prediction": prediction_val,
+        "new_credits": current_user.credits,
+        "scan_id": new_scan.id
+    }
 
 @app.on_event("startup")
 def startup_event():
@@ -304,40 +355,38 @@ async def get_plans(request:Request, db: Session = Depends(get_db)):
 
 @app.post("/add-credits/")
 @limiter.limit("5/minute")
-async def add_credits(request:Request, email: str, amount: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
-    if not user: raise HTTPException(status_code=404, detail="Uknown User")
-    user.credits += amount
-    db.add(Transaction(user_id=user.id, amount=amount, transaction_type="PURCHASE", description=f"Plus {amount}"))
+async def add_credits(request:Request, amount: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    current_user.credits += amount
+    db.add(Transaction(user_id=current_user.id, amount=amount, transaction_type="PURCHASE", description=f"Plus {amount}"))
     db.commit()
-    return {"new_credits": user.credits}
+    return {"new_credits": current_user.credits}
 
 @app.post("/upgrade-plan/")
 @limiter.limit("5/minute")
-async def upgrade_plan(request:Request, email: str, plan_name: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
+async def upgrade_plan(request:Request, plan_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan_name).first()
-    if not user or not plan: raise HTTPException(status_code=404, detail="Error")
-    user.plan_id = plan.id
-    user.credits += plan.monthly_credits
+    if not plan: raise HTTPException(status_code=404, detail="Error")
+    current_user.plan_id = plan.id
+    current_user.credits += plan.monthly_credits
     db.commit()
-    return {"new_credits": user.credits}
+    return {"new_credits": current_user.credits}
 
 class FeedbackSchema(BaseModel):
     scan_id: Optional[int] = None
-    email: str
     is_correct: bool
     comment: Optional[str] = None
 
 @app.post("/feedback/")
 @limiter.limit("5/minute")
-async def submit_feedback(request:Request, feedback: FeedbackSchema, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == feedback.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Unknown User")
-    
+async def submit_feedback(request:Request, feedback: FeedbackSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Verificam daca scanarea apartine utilizatorului (Prevenire IDOR)
+    if feedback.scan_id:
+        scan = db.query(Scan).filter(Scan.id == feedback.scan_id, Scan.user_id == current_user.id).first()
+        if not scan:
+            raise HTTPException(status_code=403, detail="Not authorized to provide feedback for this scan")
+
     new_feedback = UserFeedback(
-        user_id=user.id,
+        user_id=current_user.id,
         scan_id=feedback.scan_id,
         is_correct=feedback.is_correct,
         comment=feedback.comment
