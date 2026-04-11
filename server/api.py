@@ -14,17 +14,20 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqladmin import Admin, ModelView
+from fastapi.security import OAuth2PasswordBearer
 
-load_dotenv("/Users/21scoob/Desktop/Code/ProiectLicentaCNN/.env")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+
+load_dotenv()
 
 SECRET_KEY = os.getenv('SECRETKEYFORAPI')
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+SQLALCHEMY_DATABASE_URL = os.getenv('DATABASELOC')
 stripe.api_key = STRIPE_SECRET_KEY
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./licenta.db"
 app = FastAPI(title="Deepfake API")
 
 limiter = Limiter(key_func=get_remote_address)
@@ -131,8 +134,30 @@ class UserAdmin(ModelView, model=User):
     can_delete = True
     can_create = True
     can_export = True
-    
+
+class ScanAdmin(ModelView, model=Scan):
+    column_list = [Scan.id, Scan.user_id, Scan.filename, Scan.prediction, Scan.confidence, Scan.created_at]
+    can_edit = False
+    can_delete = True
+
+class TransactionAdmin(ModelView, model=Transaction):
+    column_list = [Transaction.id, Transaction.user_id, Transaction.amount, Transaction.transaction_type, Transaction.created_at]
+
+class FeedbackAdmin(ModelView, model=UserFeedback):
+    column_list = [UserFeedback.id, UserFeedback.user_id, UserFeedback.scan_id, UserFeedback.is_correct, UserFeedback.created_at]
+
+class PlanAdmin(ModelView, model=SubscriptionPlan):
+    column_list = [SubscriptionPlan.id, SubscriptionPlan.name, SubscriptionPlan.price, SubscriptionPlan.monthly_credits]
+
+class ModelMetadataAdmin(ModelView, model=ModelMetadata):
+    column_list = [ModelMetadata.id, ModelMetadata.name, ModelMetadata.version, ModelMetadata.is_active]
+
 admin.add_view(UserAdmin)
+admin.add_view(ScanAdmin)
+admin.add_view(TransactionAdmin)
+admin.add_view(FeedbackAdmin)
+admin.add_view(PlanAdmin)
+admin.add_view(ModelMetadataAdmin)
 
 Base.metadata.create_all(bind=engine)
 
@@ -153,10 +178,6 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
-
-from fastapi.security import OAuth2PasswordBearer
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
 def get_db():
     db = SessionLocal()
@@ -229,17 +250,22 @@ async def predict_image(request:Request, file: UploadFile = File(...), current_u
     if current_user.credits <= 0:
         raise HTTPException(status_code=402, detail="Insufficient credits")
     
+    start_time = datetime.utcnow()
     current_user.credits -= 1
     db.add(Transaction(user_id=current_user.id, amount=-1, transaction_type="SCAN", description=f"Scan: {file.filename}"))
-    
+    model_meta = db.query(ModelMetadata).filter(ModelMetadata.is_active == True).first()
     prediction_val = 87.5 
+    end_time = datetime.utcnow()
+    proc_time = int((end_time - start_time).total_seconds() * 1000)
     
     new_scan = Scan(
         user_id=current_user.id,
+        model_id=model_meta.id if model_meta else None,
         filename=file.filename,
-        file_path="simulated_path",
+        file_path=f"simulated_uploads/{file.filename}",
         prediction="Deepfake" if prediction_val > 50 else "Real",
-        confidence=prediction_val
+        confidence=prediction_val,
+        processing_time_ms=proc_time
     )
     db.add(new_scan)
     db.commit()
@@ -268,15 +294,20 @@ def startup_event():
     finally:
         db.close()
 
+class UserRegister(BaseModel):
+    email: str
+    password: str
+    username: str
+
 @app.post("/register/")
 @limiter.limit("5/minute")
-async def register_user(request:Request, email: str, password: str, username: str, db: Session = Depends(get_db)):
-    email_clean = email.strip().lower()
-    username_clean = username.strip()
-    
+async def register_user(request: Request, user_data: UserRegister, db: Session = Depends(get_db)):
+    email_clean = user_data.email.strip().lower()
+    username_clean = user_data.username.strip()
+    password = user_data.password
+
     if db.query(User).filter((User.email == email_clean) | (User.username == username_clean)).first():
-        raise HTTPException(status_code=400, detail="Email or Username already taken")
-    
+        raise HTTPException(status_code=400, detail="Email or Username already taken")    
     free_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == "Free").first()
     new_user = User(
         email=email_clean, username=username_clean,
@@ -379,7 +410,7 @@ class FeedbackSchema(BaseModel):
 @app.post("/feedback/")
 @limiter.limit("5/minute")
 async def submit_feedback(request:Request, feedback: FeedbackSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Verificam daca scanarea apartine utilizatorului (Prevenire IDOR)
+    
     if feedback.scan_id:
         scan = db.query(Scan).filter(Scan.id == feedback.scan_id, Scan.user_id == current_user.id).first()
         if not scan:

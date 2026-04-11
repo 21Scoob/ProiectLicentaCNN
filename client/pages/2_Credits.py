@@ -4,7 +4,7 @@ from extra_streamlit_components import CookieManager
 from utils import init_session, handle_auth, render_sidebar, require_auth, API_URL
 import webbrowser
 
-st.set_page_config(page_title="Credits")
+st.set_page_config(page_title="Credits", initial_sidebar_state="collapsed")
 
 cookie_manager = CookieManager()
 init_session()

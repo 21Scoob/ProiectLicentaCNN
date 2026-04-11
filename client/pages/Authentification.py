@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import time
 from utils import init_session, handle_auth, render_sidebar, API_URL
 
-st.set_page_config(page_title="Authentication")
+st.set_page_config(page_title="Authentication", initial_sidebar_state="collapsed")
 
 cookie_manager = CookieManager()
 init_session()
@@ -49,7 +49,7 @@ if st.session_state['user'] is None:
         
         if st.button("Register",use_container_width=True):
             try:
-                response = requests.post(f"{API_URL}/register/?email={email_reg}&password={pass_reg}&username={user_reg}")
+                response = requests.post(f"{API_URL}/register/", json={"email": email_reg, "password": pass_reg, "username": user_reg})
                 if response.status_code == 200:
                     data = response.json()
                     st.session_state.update({"user": data['user']['email'], "username": data['user']['username'], "credits": data['user']['credits'], "auth_token": data['access_token']})

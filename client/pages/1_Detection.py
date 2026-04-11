@@ -3,7 +3,7 @@ import requests
 from extra_streamlit_components import CookieManager
 from utils import init_session, handle_auth, render_sidebar, require_auth, API_URL
 
-st.set_page_config(page_title="Deepfake Detection")
+st.set_page_config(page_title="Deepfake Detection", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>

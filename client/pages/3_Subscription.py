@@ -3,7 +3,7 @@ import requests
 from extra_streamlit_components import CookieManager
 from utils import init_session, handle_auth, render_sidebar, require_auth, API_URL
 
-st.set_page_config(page_title="Subscriptions")
+st.set_page_config(page_title="Subscriptions", initial_sidebar_state="collapsed")
 
 cookie_manager = CookieManager()
 init_session()
@@ -23,7 +23,7 @@ try:
     if response.status_code == 200:
         all_plans = response.json()
     else:
-        st.error("Serverul a returnat o eroare la încărcarea planurilor.")
+        st.error("Too many requests, come back later.")
 except requests.exceptions.RequestException:
     st.error("Nu mă pot conecta la server pentru a încărca planurile.")
 

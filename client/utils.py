@@ -24,18 +24,24 @@ def handle_auth(cookie_manager):
     if st.session_state.get("logout_in_progress"):                                              
       st.session_state["logout_in_progress"] = False                              
       return None 
+      
+    if st.session_state.get("user") and st.session_state.get("auth_token"):
+        return st.session_state["auth_token"]
+
     time.sleep(0.1) 
     jwt_token = cookie_manager.get("auth_token")
 
     if jwt_token and st.session_state["user"] is None:
         try:
-            response = requests.get(f"{API_URL}/validate-token/?token={jwt_token}")
+            response = requests.get(f"{API_URL}/validate-token/", headers={"Authorization": f"Bearer {jwt_token}"})
             if response.status_code == 200:
                 user_data = response.json()
                 st.session_state["user"] = user_data["email"]
                 st.session_state["username"] = user_data["username"]
                 st.session_state["credits"] = user_data["credits"]
                 st.session_state["auth_token"] = jwt_token
+            else:
+                st.session_state["auth_token"] = None
         except Exception:
             pass
     return jwt_token
