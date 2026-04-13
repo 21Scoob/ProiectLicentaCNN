@@ -34,8 +34,7 @@ if "success" in query_params and "session_id" in query_params:
 if "canceled" in query_params:
     st.warning("Plata a fost anulată.")
     st.query_params.clear()
-
-
+    
 st.title("Reîncarcă-ți Contul")
 st.write("Alege pachetul de credite care ți se potrivește.")
 

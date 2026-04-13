@@ -9,6 +9,10 @@ st.set_page_config(page_title="Authentication", initial_sidebar_state="collapsed
 
 cookie_manager = CookieManager()
 init_session()
+
+if st.session_state.get('logout_in_progress'):
+    st.session_state['logout_in_progress'] = False
+
 handle_auth(cookie_manager)
 render_sidebar(cookie_manager)
 
@@ -65,6 +69,4 @@ if st.session_state['user'] is None:
             except:
                 st.error("Error connecting to the server.")
 else:
-    st.success(f"You are already connected as {st.session_state['username']}!")
-    if st.button("Go to detector", use_container_width=True):
-        st.switch_page("pages/1_Detection.py")
+    st.switch_page("pages/1_Detection.py")

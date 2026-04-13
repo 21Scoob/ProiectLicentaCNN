@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import time
 from datetime import datetime, timedelta
 
 
@@ -22,13 +21,11 @@ def init_session():
 def handle_auth(cookie_manager):
     """Auto-Login logic"""
     if st.session_state.get("logout_in_progress"):                                              
-      st.session_state["logout_in_progress"] = False                              
       return None 
       
     if st.session_state.get("user") and st.session_state.get("auth_token"):
         return st.session_state["auth_token"]
 
-    time.sleep(0.1) 
     jwt_token = cookie_manager.get("auth_token")
 
     if jwt_token and st.session_state["user"] is None:
@@ -40,6 +37,7 @@ def handle_auth(cookie_manager):
                 st.session_state["username"] = user_data["username"]
                 st.session_state["credits"] = user_data["credits"]
                 st.session_state["auth_token"] = jwt_token
+                st.rerun()
             else:
                 st.session_state["auth_token"] = None
         except Exception:
@@ -126,7 +124,6 @@ def render_sidebar(cookie_manager):
                 </div>
             """, unsafe_allow_html=True)
         
-        st.write("### Nav")
         if st.button("Home", key="nav_home", use_container_width=True):
             st.switch_page("webapp.py")
         
@@ -152,12 +149,10 @@ def render_sidebar(cookie_manager):
                 st.session_state["credits"] = 0
                 st.session_state["auth_token"] = None
                 st.session_state["logout_in_progress"] = True
-                time.sleep(0.5)
-                st.switch_page("pages/Authentification.py")
 
 def require_auth():
     """Blocheaza accesul paginii daca userul nu e logat"""
-    if st.session_state['user'] is None:
+    if st.session_state["user"] is None:
         st.warning("Please go and authenticate to continue on this page.")
         if st.button("Go to Authentication", key="req_auth_btn"):
             st.switch_page("pages/Authentification.py")

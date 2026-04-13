@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 import bcrypt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from typing import Optional
@@ -137,7 +137,6 @@ class UserAdmin(ModelView, model=User):
 
 class ScanAdmin(ModelView, model=Scan):
     column_list = [Scan.id, Scan.user_id, Scan.filename, Scan.prediction, Scan.confidence, Scan.created_at]
-    can_edit = False
     can_delete = True
 
 class TransactionAdmin(ModelView, model=Transaction):
@@ -217,8 +216,8 @@ async def create_checkout_session(request:Request, amount: int, price_eur: float
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=f"http://localhost:8501/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
-            cancel_url="http://localhost:8501/Credits?canceled=true",
+            success_url=f"http://localhost:8502/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
+            cancel_url="http://localhost:8502/Credits?canceled=true",
             customer_email=current_user.email,
             metadata={"amount": amount, "user_email": current_user.email}
         )
@@ -295,7 +294,7 @@ def startup_event():
         db.close()
 
 class UserRegister(BaseModel):
-    email: str
+    email: EmailStr 
     password: str
     username: str
 
@@ -359,38 +358,18 @@ async def login_user(request:Request, credentials: UserCredentials, db: Session 
 
 @app.get("/validate-token/")
 @limiter.limit("5/minute")
-async def validate_token(request:Request, token: str, db: Session = Depends(get_db)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(status_code=401, detail="Token invalid")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token invalid")
-    
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise HTTPException(status_code=401, detail="Nonexistent User")
-    
+async def validate_token(request:Request, current_user: User = Depends(get_current_user)):
     return {
-        "email": user.email, 
-        "username": user.username, 
-        "credits": user.credits,
-        "plan": user.plan.name if user.plan else "Free"
+        "email": current_user.email, 
+        "username": current_user.username, 
+        "credits": current_user.credits,
+        "plan": current_user.plan.name if current_user.plan else "Free"
     }
 
 @app.get("/plans/")
 @limiter.limit("5/minute")
 async def get_plans(request:Request, db: Session = Depends(get_db)):
     return db.query(SubscriptionPlan).all()
-
-@app.post("/add-credits/")
-@limiter.limit("5/minute")
-async def add_credits(request:Request, amount: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    current_user.credits += amount
-    db.add(Transaction(user_id=current_user.id, amount=amount, transaction_type="PURCHASE", description=f"Plus {amount}"))
-    db.commit()
-    return {"new_credits": current_user.credits}
 
 @app.post("/upgrade-plan/")
 @limiter.limit("5/minute")

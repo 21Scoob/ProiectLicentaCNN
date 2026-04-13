@@ -31,3 +31,10 @@ GEMINI.md
 api.py
 
 /Users/21scoob/Desktop/Code/ProiectLicentaCNN/server/.env
+.gemini/
+gha-creds-*.json
+
+
+/Users/21scoob/Desktop/Code/ProiectLicentaCNN/tests/test_auth.py
+
+/Users/21scoob/Desktop/Code/ProiectLicentaCNN/.github
