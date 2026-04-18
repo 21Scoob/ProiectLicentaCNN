@@ -216,8 +216,8 @@ async def create_checkout_session(request:Request, amount: int, price_eur: float
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=f"http://localhost:8502/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
-            cancel_url="http://localhost:8502/Credits?canceled=true",
+            success_url=f"http://localhost:8501/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
+            cancel_url="http://localhost:8501/Credits?canceled=true",
             customer_email=current_user.email,
             metadata={"amount": amount, "user_email": current_user.email}
         )

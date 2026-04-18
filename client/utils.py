@@ -26,7 +26,7 @@ def handle_auth(cookie_manager):
     if st.session_state.get("user") and st.session_state.get("auth_token"):
         return st.session_state["auth_token"]
 
-    jwt_token = cookie_manager.get("auth_token")
+    jwt_token = cookie_manager.get("auth_token") or st.session_state.get("auth_token")
 
     if jwt_token and st.session_state["user"] is None:
         try:
