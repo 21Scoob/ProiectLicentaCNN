@@ -15,13 +15,16 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqladmin import Admin, ModelView
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.middleware.cors import CORSMiddleware
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
 load_dotenv()
 
 SECRET_KEY = os.getenv('SECRETKEYFORAPI')
+assert SECRET_KEY is not None, "The api key is not in .env"
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+assert STRIPE_SECRET_KEY is not None, "The api stripe key is not in .env"
 SQLALCHEMY_DATABASE_URL = os.getenv('DATABASELOC')
 stripe.api_key = STRIPE_SECRET_KEY
 
@@ -29,6 +32,16 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
 
 app = FastAPI(title="Deepfake API")
+
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -371,6 +384,10 @@ async def validate_token(request:Request, current_user: User = Depends(get_curre
 async def get_plans(request:Request, db: Session = Depends(get_db)):
     return db.query(SubscriptionPlan).all()
 
+@app.get("/credits/")
+@limiter.limit("5/minute")
+async def get_credits(request:Request, db: Session = Depends(get_db)):
+    return
 @app.post("/upgrade-plan/")
 @limiter.limit("5/minute")
 async def upgrade_plan(request:Request, plan_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
