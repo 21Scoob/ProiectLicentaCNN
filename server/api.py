@@ -53,14 +53,6 @@ Base = declarative_base()
 
 admin = Admin(app, engine)
 
-class SubscriptionPlan(Base):
-    __tablename__ = "subscription_plans"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True)
-    price = Column(Float, default=0.0)
-    monthly_credits = Column(Integer, default=5)
-    users = relationship("User", back_populates="plan")
-
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -69,12 +61,11 @@ class User(Base):
     hashed_password = Column(String)
     role = Column(String, default="user")
     credits = Column(Integer, default=10) 
-    plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    plan = relationship("SubscriptionPlan", back_populates="users")
+   
     scans = relationship("Scan", back_populates="owner")
     tokens = relationship("AuthToken", back_populates="owner")
     wallet_history = relationship("Transaction", back_populates="owner")
@@ -140,6 +131,13 @@ class ProcessedPayment(Base):
     id = Column(Integer, primary_key=True, index=True)
     stripe_session_id = Column(String, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+class Sources(Base):
+    __tablename__ = "user_sources"
+    id = Column(Integer, primary_key=True, index=True)
+    scan_id = Column(Integer, ForeignKey("scans.id"))
+    
+
 
 class UserAdmin(ModelView, model=User):
     column_list = [User.id, User.email, User.username, User.role, User.credits]
@@ -158,9 +156,6 @@ class TransactionAdmin(ModelView, model=Transaction):
 class FeedbackAdmin(ModelView, model=UserFeedback):
     column_list = [UserFeedback.id, UserFeedback.user_id, UserFeedback.scan_id, UserFeedback.is_correct, UserFeedback.created_at]
 
-class PlanAdmin(ModelView, model=SubscriptionPlan):
-    column_list = [SubscriptionPlan.id, SubscriptionPlan.name, SubscriptionPlan.price, SubscriptionPlan.monthly_credits]
-
 class ModelMetadataAdmin(ModelView, model=ModelMetadata):
     column_list = [ModelMetadata.id, ModelMetadata.name, ModelMetadata.version, ModelMetadata.is_active]
 
@@ -168,7 +163,6 @@ admin.add_view(UserAdmin)
 admin.add_view(ScanAdmin)
 admin.add_view(TransactionAdmin)
 admin.add_view(FeedbackAdmin)
-admin.add_view(PlanAdmin)
 admin.add_view(ModelMetadataAdmin)
 
 Base.metadata.create_all(bind=engine)
@@ -293,13 +287,6 @@ async def predict_image(request:Request, file: UploadFile = File(...), current_u
 def startup_event():
     db = SessionLocal()
     try:
-        if db.query(SubscriptionPlan).count() == 0:
-            db.add_all([
-                SubscriptionPlan(name="Free", price=0.0, monthly_credits=5),
-                SubscriptionPlan(name="Pro", price=29.99, monthly_credits=100),
-                SubscriptionPlan(name="Gold", price=99.99, monthly_credits=1000)
-            ])
-            db.commit()
         if db.query(ModelMetadata).count() == 0:
             db.add(ModelMetadata(name="ResNet50 + ViT Ensemble", version="1.0.0", is_active=True))
             db.commit()
@@ -320,11 +307,9 @@ async def register_user(request: Request, user_data: UserRegister, db: Session =
 
     if db.query(User).filter((User.email == email_clean) | (User.username == username_clean)).first():
         raise HTTPException(status_code=400, detail="Email or Username already taken")    
-    free_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == "Free").first()
     new_user = User(
         email=email_clean, username=username_clean,
         hashed_password=hash_password(password),
-        plan_id=free_plan.id if free_plan else None,
         credits=10
     )
     db.add(new_user)
@@ -342,7 +327,6 @@ async def register_user(request: Request, user_data: UserRegister, db: Session =
             "email": new_user.email, 
             "username": new_user.username, 
             "credits": new_user.credits,
-            "plan": new_user.plan.name if new_user.plan else "Free"
         }
     }
 
@@ -376,27 +360,12 @@ async def validate_token(request:Request, current_user: User = Depends(get_curre
         "email": current_user.email, 
         "username": current_user.username, 
         "credits": current_user.credits,
-        "plan": current_user.plan.name if current_user.plan else "Free"
     }
-
-@app.get("/plans/")
-@limiter.limit("5/minute")
-async def get_plans(request:Request, db: Session = Depends(get_db)):
-    return db.query(SubscriptionPlan).all()
 
 @app.get("/credits/")
 @limiter.limit("5/minute")
 async def get_credits(request:Request, db: Session = Depends(get_db)):
     return
-@app.post("/upgrade-plan/")
-@limiter.limit("5/minute")
-async def upgrade_plan(request:Request, plan_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan_name).first()
-    if not plan: raise HTTPException(status_code=404, detail="Error")
-    current_user.plan_id = plan.id
-    current_user.credits += plan.monthly_credits
-    db.commit()
-    return {"new_credits": current_user.credits}
 
 class FeedbackSchema(BaseModel):
     scan_id: Optional[int] = None

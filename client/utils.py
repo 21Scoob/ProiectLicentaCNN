@@ -135,8 +135,6 @@ def render_sidebar(cookie_manager):
                 st.switch_page("pages/1_Detection.py")
             if st.button("Credits", key="nav_cred", use_container_width=True):
                 st.switch_page("pages/2_Credits.py")
-            if st.button("Subscriptions", key="nav_sub", use_container_width=True):
-                st.switch_page("pages/3_Subscription.py")
             
             st.write("---")
             if st.button("Logout", key="nav_logout", use_container_width=True):
