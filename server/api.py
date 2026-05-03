@@ -70,6 +70,9 @@ class User(Base):
     tokens = relationship("AuthToken", back_populates="owner")
     wallet_history = relationship("Transaction", back_populates="owner")
     feedbacks = relationship("UserFeedback", back_populates="owner")
+    source = relationship("ImageSource", back_populates="owner")
+    note = relationship("ScanNote", back_populates="owner")
+    
 
 class ModelMetadata(Base):
     __tablename__ = "model_metadata"
@@ -77,6 +80,7 @@ class ModelMetadata(Base):
     name = Column(String)
     version = Column(String)
     is_active = Column(Boolean, default=True)
+    
     scans = relationship("Scan", back_populates="model")
     
 class Scan(Base):
@@ -93,6 +97,8 @@ class Scan(Base):
     owner = relationship("User", back_populates="scans")
     model = relationship("ModelMetadata", back_populates="scans")
     feedback = relationship("UserFeedback", back_populates="scan", uselist=False)
+    source = relationship("ImageSource", back_populates="scan", uselist=False)
+    note = relationship("ScanNote", back_populates="scan", uselist=False)   
 
 class AuthToken(Base):
     __tablename__ = "auth_tokens"
@@ -132,12 +138,29 @@ class ProcessedPayment(Base):
     stripe_session_id = Column(String, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-class Sources(Base):
-    __tablename__ = "user_sources"
+class ImageSource(Base):
+    __tablename__ = "image_sources"
     id = Column(Integer, primary_key=True, index=True)
-    scan_id = Column(Integer, ForeignKey("scans.id"))
-    
+    user_id = Column(Integer, ForeignKey("users.id"))
+    scan_id = Column(Integer, ForeignKey("scans.id"), unique=True)
+    source_name = Column(String, index=True)
+    display_name = Column(String, index=True)
+    source_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
+    owner = relationship("User", back_populates="source")
+    scan = relationship("Scan", back_populates="source")
+
+class ScanNote(Base):
+    __tablename__ = "scan_notes"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    scan_id = Column(Integer, ForeignKey("scans.id"), unique=True)
+    text = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    owner = relationship("User", back_populates="note")
+    scan = relationship("Scan", back_populates="note")
 
 class UserAdmin(ModelView, model=User):
     column_list = [User.id, User.email, User.username, User.role, User.credits]
@@ -159,11 +182,21 @@ class FeedbackAdmin(ModelView, model=UserFeedback):
 class ModelMetadataAdmin(ModelView, model=ModelMetadata):
     column_list = [ModelMetadata.id, ModelMetadata.name, ModelMetadata.version, ModelMetadata.is_active]
 
+class ImageSourceAdmin(ModelView, model=ImageSource):
+    column_list = [ImageSource.id, ImageSource.user_id, ImageSource.scan_id, ImageSource.source_name, ImageSource.created_at]
+    can_delete = True
+
+class ScanNoteAdmin(ModelView, model=ScanNote):
+    column_list = [ScanNote.id, ScanNote.user_id, ScanNote.scan_id, ScanNote.created_at]
+    can_delete = True
+
 admin.add_view(UserAdmin)
 admin.add_view(ScanAdmin)
 admin.add_view(TransactionAdmin)
 admin.add_view(FeedbackAdmin)
 admin.add_view(ModelMetadataAdmin)
+admin.add_view(ImageSourceAdmin)
+admin.add_view(ScanNoteAdmin)
 
 Base.metadata.create_all(bind=engine)
 
