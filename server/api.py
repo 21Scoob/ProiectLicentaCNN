@@ -6,7 +6,7 @@ import bcrypt
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 import os
 import stripe
@@ -64,6 +64,10 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    name = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    company_name = Column(String, nullable=True)
+    threshold = Column(Float, default=50.0)
 
    
     scans = relationship("Scan", back_populates="owner")
@@ -297,12 +301,15 @@ async def predict_image(request:Request, file: UploadFile = File(...), current_u
     end_time = datetime.utcnow()
     proc_time = int((end_time - start_time).total_seconds() * 1000)
     
+    user_threshold = current_user.threshold or 50.0
+    label = "Real" if prediction_val >= user_threshold else "Deepfake"
+    
     new_scan = Scan(
         user_id=current_user.id,
         model_id=model_meta.id if model_meta else None,
         filename=file.filename,
         file_path=f"simulated_uploads/{file.filename}",
-        prediction="Deepfake" if prediction_val > 50 else "Real",
+        prediction=label,
         confidence=prediction_val,
         processing_time_ms=proc_time
     )
@@ -312,6 +319,8 @@ async def predict_image(request:Request, file: UploadFile = File(...), current_u
     
     return {
         "prediction": prediction_val,
+        "label": label,
+        "threshold": user_threshold,
         "new_credits": current_user.credits,
         "scan_id": new_scan.id
     }
@@ -325,6 +334,22 @@ def startup_event():
             db.commit()
     finally:
         db.close()
+
+    
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    existing_cols = [c["name"] for c in inspector.get_columns("users")]
+    migrations = {
+        "name": "ALTER TABLE users ADD COLUMN name VARCHAR",
+        "address": "ALTER TABLE users ADD COLUMN address VARCHAR",
+        "company_name": "ALTER TABLE users ADD COLUMN company_name VARCHAR",
+        "threshold": "ALTER TABLE users ADD COLUMN threshold FLOAT DEFAULT 50.0",
+    }
+    with engine.begin() as conn:
+        for col_name, sql in migrations.items():
+            if col_name not in existing_cols:
+                conn.execute(text(sql))
+                print(f"  Migrated: added column '{col_name}' to users table")
 
 class UserRegister(BaseModel):
     email: EmailStr 
@@ -381,8 +406,7 @@ async def login_user(request:Request, credentials: UserCredentials, db: Session 
         "user": {
             "email": user.email, 
             "username": user.username, 
-            "credits": user.credits,
-            "plan": user.plan.name if user.plan else "Free"
+            "credits": user.credits
         }
     }
 
@@ -397,8 +421,20 @@ async def validate_token(request:Request, current_user: User = Depends(get_curre
 
 @app.get("/credits/")
 @limiter.limit("5/minute")
-async def get_credits(request:Request, db: Session = Depends(get_db)):
-    return
+async def get_credits(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    transactions = db.query(Transaction).filter(Transaction.user_id == current_user.id).order_by(Transaction.created_at.desc()).limit(50).all()
+    return {
+        "credits": current_user.credits,
+        "transactions": [
+            {
+                "id": t.id,
+                "amount": t.amount,
+                "type": t.transaction_type,
+                "description": t.description,
+                "created_at": t.created_at.isoformat()
+            } for t in transactions
+        ]
+    }
 
 class FeedbackSchema(BaseModel):
     scan_id: Optional[int] = None
@@ -423,3 +459,206 @@ async def submit_feedback(request:Request, feedback: FeedbackSchema, current_use
     db.add(new_feedback)
     db.commit()
     return {"status": "success", "message": "Saved Feedback"}
+
+class SourceSchema(BaseModel):
+    scan_id: int
+    display_name: str
+
+
+@app.post("/source/")
+@limiter.limit("5/minute")
+async def submit_source(request: Request, source: SourceSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    scan = db.query(Scan).filter(Scan.id == source.scan_id, Scan.user_id == current_user.id).first()
+    if not scan:
+        raise HTTPException(status_code=403, detail="Not authorized to provide source for this scan")
+
+    existing = db.query(ImageSource).filter(ImageSource.scan_id == source.scan_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Source already set for this scan")
+
+    new_source = ImageSource(
+        user_id=current_user.id,
+        scan_id=source.scan_id,
+        source_name=source.display_name.strip().lower(),
+        display_name=source.display_name.strip()
+    )
+    db.add(new_source)
+    db.commit()
+    return {"status": "success", "message": "Source saved"}
+
+
+@app.get("/source-stats/")
+@limiter.limit("10/minute")
+async def get_source_stats(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sources = db.query(ImageSource).filter(ImageSource.user_id == current_user.id).all()
+
+    stats = {}
+    for src in sources:
+        key = src.source_name
+        if key not in stats:
+            stats[key] = {"display_name": src.display_name, "total": 0, "real": 0}
+
+        scan = db.query(Scan).filter(Scan.id == src.scan_id).first()
+        if scan:
+            stats[key]["total"] += 1
+            if scan.prediction == "Real":
+                stats[key]["real"] += 1
+
+    result = []
+    for source_name, data in stats.items():
+        veridicity = (data["real"] / data["total"] * 100) if data["total"] > 0 else 0
+        result.append({
+            "source_name": source_name,
+            "display_name": data["display_name"],
+            "total_scans": data["total"],
+            "real_count": data["real"],
+            "veridicity_percentage": round(veridicity, 1)
+        })
+
+    return result
+
+
+
+@app.get("/scans/")
+@limiter.limit("10/minute")
+async def get_scans(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    scans = db.query(Scan).filter(Scan.user_id == current_user.id).order_by(Scan.created_at.desc()).all()
+    result = []
+    for s in scans:
+        source_info = None
+        if s.source:
+            source_info = {"display_name": s.source.display_name, "source_name": s.source.source_name}
+        feedback_info = None
+        if s.feedback:
+            feedback_info = {"is_correct": s.feedback.is_correct, "comment": s.feedback.comment}
+        note_info = None
+        if s.note:
+            note_info = s.note.text
+
+        result.append({
+            "id": s.id,
+            "filename": s.filename,
+            "prediction": s.prediction,
+            "confidence": s.confidence,
+            "processing_time_ms": s.processing_time_ms,
+            "created_at": s.created_at.isoformat(),
+            "source": source_info,
+            "feedback": feedback_info,
+            "note": note_info
+        })
+    return result
+
+
+
+@app.get("/stats/")
+@limiter.limit("10/minute")
+async def get_stats(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    scans = db.query(Scan).filter(Scan.user_id == current_user.id).all()
+    total_scans = len(scans)
+    deepfake_count = sum(1 for s in scans if s.prediction == "Deepfake")
+    real_count = total_scans - deepfake_count
+    avg_confidence = round(sum(s.confidence for s in scans) / total_scans, 1) if total_scans > 0 else 0
+    avg_processing_time = round(sum((s.processing_time_ms or 0) for s in scans) / total_scans) if total_scans > 0 else 0
+
+    
+    spent = db.query(Transaction).filter(
+        Transaction.user_id == current_user.id,
+        Transaction.amount < 0
+    ).all()
+    total_credits_spent = abs(sum(t.amount for t in spent))
+
+    
+    feedbacks = db.query(UserFeedback).filter(UserFeedback.user_id == current_user.id).all()
+    feedback_correct = sum(1 for f in feedbacks if f.is_correct)
+    feedback_total = len(feedbacks)
+    accuracy_from_feedback = round(feedback_correct / feedback_total * 100, 1) if feedback_total > 0 else None
+
+    
+    from collections import Counter
+    daily = Counter()
+    for s in scans:
+        day_key = s.created_at.strftime("%Y-%m-%d")
+        daily[day_key] += 1
+
+    return {
+        "total_scans": total_scans,
+        "deepfake_count": deepfake_count,
+        "real_count": real_count,
+        "avg_confidence": avg_confidence,
+        "avg_processing_time_ms": avg_processing_time,
+        "total_credits_spent": total_credits_spent,
+        "current_credits": current_user.credits,
+        "feedback_total": feedback_total,
+        "feedback_correct": feedback_correct,
+        "accuracy_from_feedback": accuracy_from_feedback,
+        "scans_per_day": dict(sorted(daily.items())),
+        "member_since": current_user.created_at.isoformat()
+    }
+
+
+
+@app.get("/profile/")
+@limiter.limit("5/minute")
+async def get_profile(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    scan_count = db.query(Scan).filter(Scan.user_id == current_user.id).count()
+    return {
+        "username": current_user.username,
+        "email": current_user.email,
+        "credits": current_user.credits,
+        "role": current_user.role,
+        "is_verified": current_user.is_verified,
+        "member_since": current_user.created_at.isoformat(),
+        "total_scans": scan_count,
+        "name": current_user.name,
+        "address": current_user.address,
+        "company_name": current_user.company_name,
+        "threshold": current_user.threshold or 50.0
+    }
+
+
+class ProfileUpdate(BaseModel):
+    username: Optional[str] = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    company_name: Optional[str] = None
+    threshold: Optional[float] = None
+
+
+@app.put("/profile/")
+@limiter.limit("5/minute")
+async def update_profile(request: Request, data: ProfileUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if data.username is not None:
+        clean = data.username.strip()
+        existing = db.query(User).filter(User.username == clean, User.id != current_user.id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        current_user.username = clean
+    if data.name is not None:
+        current_user.name = data.name.strip()
+    if data.address is not None:
+        current_user.address = data.address.strip()
+    if data.company_name is not None:
+        current_user.company_name = data.company_name.strip()
+    if data.threshold is not None:
+        if not (0 <= data.threshold <= 100):
+            raise HTTPException(status_code=400, detail="Threshold must be between 0 and 100")
+        current_user.threshold = data.threshold
+    db.commit()
+    return {"status": "success", "message": "Profile updated"}
+
+
+class ChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.put("/change-password/")
+@limiter.limit("3/minute")
+async def change_password(request: Request, data: ChangePassword, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not verify_password(data.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect current password")
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    current_user.hashed_password = hash_password(data.new_password)
+    db.commit()
+    return {"status": "success", "message": "Password changed"}

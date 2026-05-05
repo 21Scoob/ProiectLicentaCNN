@@ -10,8 +10,8 @@ accelerate
 safetensors
 google-genai
 google
-icrawler 
-face_recognition 
+icrawler
+face_recognition
 opencv-python
 streamlit
 psycopg2-binary
@@ -22,10 +22,10 @@ python-dotenv
 tqdm
 pip-system-certs
 supabase
-fastapi 
-uvicorn 
+fastapi
+uvicorn
 sqlalchemy 
-passlib 
+passlib
 python-multipart
 python-jose[cryptography]
 streamlit
@@ -34,3 +34,4 @@ bcrypt
 extra-streamlit-components
 stripe
 slowapi
+sqladmin
