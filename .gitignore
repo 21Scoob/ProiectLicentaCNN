@@ -40,3 +40,13 @@ gha-creds-*.json
 /Users/21scoob/Desktop/Code/ProiectLicentaCNN/.github
 
 ARHITECTURA_SI_FLUX.md
+
+
+skills-lock.json
+
+.agents
+
+/Users/21scoob/Desktop/Code/ProiectLicentaCNN/server/licenta.db-shm
+
+*.db-shm
+*.db-wal

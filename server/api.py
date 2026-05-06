@@ -1,12 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, File, UploadFile
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, update, text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
+from sqlalchemy.orm import sessionmaker, Session, relationship, joinedload
 import bcrypt
-from pydantic import BaseModel, EmailStr
-from datetime import datetime, timedelta
+import html
+from pydantic import BaseModel, EmailStr, Field
+from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from typing import Optional, List
+from collections import Counter
 from dotenv import load_dotenv
 import os
 import stripe
@@ -14,8 +16,10 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqladmin import Admin, ModelView
+from sqladmin.authentication import AuthenticationBackend
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
@@ -29,19 +33,25 @@ SQLALCHEMY_DATABASE_URL = os.getenv('DATABASELOC')
 stripe.api_key = STRIPE_SECRET_KEY
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8501")
+
+CREDIT_PACKAGES = {
+    10:  500,
+    50:  2000,
+    100: 3500,
+}
 
 app = FastAPI(title="Deepfake API")
 
-origins = ["*"]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[FRONTEND_URL, "http://127.0.0.1:8501"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -51,7 +61,25 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-admin = Admin(app, engine)
+
+class AdminAuth(AuthenticationBackend):
+    async def login(self, request: Request) -> bool:
+        form = await request.form()
+        username = form.get("username")
+        password = form.get("password")
+        if username == os.getenv("ADMIN_USER", "admin") and password == os.getenv("ADMIN_PASS"):
+            request.session["admin_auth"] = True
+            return True
+        return False
+
+    async def logout(self, request: Request) -> bool:
+        request.session.pop("admin_auth", None)
+        return True
+
+    async def authenticate(self, request: Request) -> bool:
+        return request.session.get("admin_auth", False)
+
+admin = Admin(app, engine, authentication_backend=AdminAuth(secret_key=SECRET_KEY))
 
 class User(Base):
     __tablename__ = "users"
@@ -247,7 +275,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         
 @app.post("/create-checkout-session/")
 @limiter.limit("5/minute")
-async def create_checkout_session(request:Request, amount: int, price_eur: float, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def create_checkout_session(request:Request, amount: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if amount not in CREDIT_PACKAGES:
+        raise HTTPException(status_code=400, detail="Invalid credit package")
+    unit_amount = CREDIT_PACKAGES[amount]
     try:
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -255,15 +286,15 @@ async def create_checkout_session(request:Request, amount: int, price_eur: float
                 'price_data': {
                     'currency': 'eur',
                     'product_data': {'name': f'{amount} Credits Deepfake Detection'},
-                    'unit_amount': int(price_eur * 100),
+                    'unit_amount': unit_amount,
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=f"http://localhost:8501/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
-            cancel_url="http://localhost:8501/Credits?canceled=true",
+            success_url=f"{FRONTEND_URL}/Credits?success=true&session_id={{CHECKOUT_SESSION_ID}}&amount={amount}",
+            cancel_url=f"{FRONTEND_URL}/Credits?canceled=true",
             customer_email=current_user.email,
-            metadata={"amount": amount, "user_email": current_user.email}
+            metadata={"amount": str(amount), "user_email": current_user.email}
         )
         return {"url": checkout_session.url}
     except Exception as e:
@@ -271,15 +302,18 @@ async def create_checkout_session(request:Request, amount: int, price_eur: float
 
 @app.get("/verify-payment/")
 @limiter.limit("5/minute")
-async def verify_payment(request:Request, session_id: str, amount: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def verify_payment(request:Request, session_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         already_processed = db.query(ProcessedPayment).filter(ProcessedPayment.stripe_session_id == session_id).first()
         if already_processed:
             return {"status": "already_processed", "new_credits": current_user.credits}
         session = stripe.checkout.Session.retrieve(session_id)
-        if session.payment_status == 'paid':            
-            current_user.credits += amount
-            db.add(Transaction(user_id=current_user.id, amount=amount, transaction_type="PURCHASE", description=f"Stripe: {amount} credite"))
+        if session.payment_status == 'paid':
+            actual_amount = int(session.metadata.get("amount", 0))
+            if actual_amount not in CREDIT_PACKAGES:
+                raise HTTPException(status_code=400, detail="Invalid payment amount")
+            current_user.credits += actual_amount
+            db.add(Transaction(user_id=current_user.id, amount=actual_amount, transaction_type="PURCHASE", description=f"Stripe: {actual_amount} credite"))
             db.add(ProcessedPayment(stripe_session_id=session_id))
             db.commit()
             return {"status": "success", "new_credits": current_user.credits}
@@ -290,17 +324,30 @@ async def verify_payment(request:Request, session_id: str, amount: int, current_
 @app.post("/predict/")
 @limiter.limit("10/minute")
 async def predict_image(request:Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user.credits <= 0:
+    # File validation
+    if file.content_type not in ["image/jpeg", "image/png"]:
+        raise HTTPException(status_code=400, detail="Only JPEG/PNG images accepted")
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum 10MB")
+    
+    # Race-safe credit deduction
+    result = db.execute(
+        update(User).where(User.id == current_user.id, User.credits > 0)
+        .values(credits=User.credits - 1)
+    )
+    if result.rowcount == 0:
         raise HTTPException(status_code=402, detail="Insufficient credits")
     
-    start_time = datetime.utcnow()
-    current_user.credits -= 1
     db.add(Transaction(user_id=current_user.id, amount=-1, transaction_type="SCAN", description=f"Scan: {file.filename}"))
+    
+    start_time = datetime.now(timezone.utc)
     model_meta = db.query(ModelMetadata).filter(ModelMetadata.is_active == True).first()
-    prediction_val = 87.5 
-    end_time = datetime.utcnow()
+    prediction_val = 87.5
+    end_time = datetime.now(timezone.utc)
     proc_time = int((end_time - start_time).total_seconds() * 1000)
     
+    db.refresh(current_user)
     user_threshold = current_user.threshold or 50.0
     label = "Real" if prediction_val >= user_threshold else "Deepfake"
     
@@ -336,9 +383,9 @@ def startup_event():
         db.close()
 
     
-    from sqlalchemy import inspect, text
-    inspector = inspect(engine)
-    existing_cols = [c["name"] for c in inspector.get_columns("users")]
+    from sqlalchemy import inspect as sa_inspect
+    insp = sa_inspect(engine)
+    existing_cols = [c["name"] for c in insp.get_columns("users")]
     migrations = {
         "name": "ALTER TABLE users ADD COLUMN name VARCHAR",
         "address": "ALTER TABLE users ADD COLUMN address VARCHAR",
@@ -352,9 +399,9 @@ def startup_event():
                 print(f"  Migrated: added column '{col_name}' to users table")
 
 class UserRegister(BaseModel):
-    email: EmailStr 
-    password: str
-    username: str
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+    username: str = Field(min_length=2, max_length=50)
 
 @app.post("/register/")
 @limiter.limit("5/minute")
@@ -389,8 +436,8 @@ async def register_user(request: Request, user_data: UserRegister, db: Session =
     }
 
 class UserCredentials(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=128)
 
 @app.post("/login/")
 @limiter.limit("5/minute")
@@ -439,7 +486,7 @@ async def get_credits(request: Request, current_user: User = Depends(get_current
 class FeedbackSchema(BaseModel):
     scan_id: Optional[int] = None
     is_correct: bool
-    comment: Optional[str] = None
+    comment: Optional[str] = Field(default=None, max_length=1000)
 
 @app.post("/feedback/")
 @limiter.limit("5/minute")
@@ -462,7 +509,7 @@ async def submit_feedback(request:Request, feedback: FeedbackSchema, current_use
 
 class SourceSchema(BaseModel):
     scan_id: int
-    display_name: str
+    display_name: str = Field(min_length=1, max_length=100)
 
 
 @app.post("/source/")
@@ -490,18 +537,18 @@ async def submit_source(request: Request, source: SourceSchema, current_user: Us
 @app.get("/source-stats/")
 @limiter.limit("10/minute")
 async def get_source_stats(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sources = db.query(ImageSource).filter(ImageSource.user_id == current_user.id).all()
+    sources = db.query(ImageSource).options(
+        joinedload(ImageSource.scan)
+    ).filter(ImageSource.user_id == current_user.id).all()
 
     stats = {}
     for src in sources:
         key = src.source_name
         if key not in stats:
             stats[key] = {"display_name": src.display_name, "total": 0, "real": 0}
-
-        scan = db.query(Scan).filter(Scan.id == src.scan_id).first()
-        if scan:
+        if src.scan:
             stats[key]["total"] += 1
-            if scan.prediction == "Real":
+            if src.scan.prediction == "Real":
                 stats[key]["real"] += 1
 
     result = []
@@ -521,8 +568,12 @@ async def get_source_stats(request: Request, current_user: User = Depends(get_cu
 
 @app.get("/scans/")
 @limiter.limit("10/minute")
-async def get_scans(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    scans = db.query(Scan).filter(Scan.user_id == current_user.id).order_by(Scan.created_at.desc()).all()
+async def get_scans(request: Request, skip: int = 0, limit: int = 50, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    scans = db.query(Scan).options(
+        joinedload(Scan.source),
+        joinedload(Scan.feedback),
+        joinedload(Scan.note)
+    ).filter(Scan.user_id == current_user.id).order_by(Scan.created_at.desc()).offset(skip).limit(limit).all()
     result = []
     for s in scans:
         source_info = None
@@ -553,32 +604,26 @@ async def get_scans(request: Request, current_user: User = Depends(get_current_u
 @app.get("/stats/")
 @limiter.limit("10/minute")
 async def get_stats(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    scans = db.query(Scan).filter(Scan.user_id == current_user.id).all()
-    total_scans = len(scans)
-    deepfake_count = sum(1 for s in scans if s.prediction == "Deepfake")
+    uid = current_user.id
+    total_scans = db.query(func.count(Scan.id)).filter(Scan.user_id == uid).scalar() or 0
+    deepfake_count = db.query(func.count(Scan.id)).filter(Scan.user_id == uid, Scan.prediction == "Deepfake").scalar() or 0
     real_count = total_scans - deepfake_count
-    avg_confidence = round(sum(s.confidence for s in scans) / total_scans, 1) if total_scans > 0 else 0
-    avg_processing_time = round(sum((s.processing_time_ms or 0) for s in scans) / total_scans) if total_scans > 0 else 0
+    avg_confidence = round(db.query(func.avg(Scan.confidence)).filter(Scan.user_id == uid).scalar() or 0, 1)
+    avg_processing_time = round(db.query(func.avg(Scan.processing_time_ms)).filter(Scan.user_id == uid).scalar() or 0)
 
-    
-    spent = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.amount < 0
-    ).all()
-    total_credits_spent = abs(sum(t.amount for t in spent))
+    total_credits_spent = abs(db.query(func.coalesce(func.sum(Transaction.amount), 0)).filter(
+        Transaction.user_id == uid, Transaction.amount < 0
+    ).scalar())
 
-    
-    feedbacks = db.query(UserFeedback).filter(UserFeedback.user_id == current_user.id).all()
-    feedback_correct = sum(1 for f in feedbacks if f.is_correct)
-    feedback_total = len(feedbacks)
+    feedback_total = db.query(func.count(UserFeedback.id)).filter(UserFeedback.user_id == uid).scalar() or 0
+    feedback_correct = db.query(func.count(UserFeedback.id)).filter(UserFeedback.user_id == uid, UserFeedback.is_correct == True).scalar() or 0
     accuracy_from_feedback = round(feedback_correct / feedback_total * 100, 1) if feedback_total > 0 else None
 
-    
-    from collections import Counter
+    # Scans per day — still needs raw rows for grouping
+    scans = db.query(Scan.created_at).filter(Scan.user_id == uid).all()
     daily = Counter()
     for s in scans:
-        day_key = s.created_at.strftime("%Y-%m-%d")
-        daily[day_key] += 1
+        daily[s.created_at.strftime("%Y-%m-%d")] += 1
 
     return {
         "total_scans": total_scans,
@@ -617,10 +662,10 @@ async def get_profile(request: Request, current_user: User = Depends(get_current
 
 
 class ProfileUpdate(BaseModel):
-    username: Optional[str] = None
-    name: Optional[str] = None
-    address: Optional[str] = None
-    company_name: Optional[str] = None
+    username: Optional[str] = Field(default=None, max_length=50)
+    name: Optional[str] = Field(default=None, max_length=100)
+    address: Optional[str] = Field(default=None, max_length=200)
+    company_name: Optional[str] = Field(default=None, max_length=100)
     threshold: Optional[float] = None
 
 
@@ -648,8 +693,8 @@ async def update_profile(request: Request, data: ProfileUpdate, current_user: Us
 
 
 class ChangePassword(BaseModel):
-    old_password: str
-    new_password: str
+    old_password: str = Field(max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 @app.put("/change-password/")
