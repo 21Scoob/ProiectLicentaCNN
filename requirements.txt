@@ -34,4 +34,4 @@ bcrypt
 extra-streamlit-components
 stripe
 slowapi
-sqladmin
+sqladminresend

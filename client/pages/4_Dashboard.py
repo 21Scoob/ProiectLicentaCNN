@@ -21,7 +21,7 @@ try:
     if res.status_code == 200:
         stats = res.json()
         
-        # ── Top Metrics ──
+        
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Scans", stats["total_scans"])
         m2.metric("Credits Left", stats["current_credits"])
@@ -30,7 +30,7 @@ try:
         
         st.markdown("---")
         
-        # ── Detection Breakdown ──
+        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -61,7 +61,7 @@ try:
         
         st.markdown("---")
         
-        # ── Scans Per Day Chart ──
+        
         st.subheader("Scan Activity")
         spd = stats.get("scans_per_day", {})
         if spd:
@@ -75,13 +75,13 @@ try:
         
         st.markdown("---")
         
-        # ── Additional Info ──
+        
         st.subheader("Account Info")
         c1, c2 = st.columns(2)
         c1.markdown(f"**Member since:** {stats['member_since'][:10]}")
         c2.markdown(f"**Avg processing time:** {stats['avg_processing_time_ms']}ms")
         
-        # ── Source Veridicity ──
+        
         st.markdown("---")
         st.subheader("Source Veridicity")
         try:

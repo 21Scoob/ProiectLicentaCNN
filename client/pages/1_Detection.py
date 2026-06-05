@@ -22,7 +22,7 @@ handle_auth(cookie_manager)
 render_sidebar(cookie_manager)
 require_auth()
 
-# ── Clear previous results when page loads fresh (no scan yet) ─────
+
 if "scan_done" not in st.session_state:
     st.session_state["scan_done"] = False
 if "uploader_key" not in st.session_state:
@@ -33,7 +33,6 @@ st.markdown("---")
 
 headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
 
-# ── Fetch existing sources for dropdown ────────────────────────────
 existing_sources = []
 try:
     src_res = requests.get(f"{API_URL}/source-stats/", headers=headers)
@@ -42,14 +41,13 @@ try:
 except Exception:
     pass
 
-# ── Image Upload ───────────────────────────────────────────────────
 st.header("Upload an image for analysis")
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], key=f"uploader_{st.session_state['uploader_key']}")
 
 if uploaded_file is not None:
     st.image(uploaded_file, caption='Uploaded image.', use_container_width=True)
     
-    # ── Source Selection ───────────────────────────────────────────
+
     st.markdown("**Source**")
     
     if existing_sources:
@@ -82,8 +80,7 @@ if uploaded_file is not None:
                         st.session_state['credits'] = data['new_credits']
                         st.session_state['show_feedback'] = True
                         st.session_state['scan_done'] = True
-                        
-                        # ── Submit source if provided ──────────────
+
                         if source_input and source_input.strip():
                             try:
                                 requests.post(
@@ -107,7 +104,6 @@ if uploaded_file is not None:
         else:
             st.error("You don't have enough credits! Please recharge your account.")
 
-# ── Analysis Result (only shown after a scan) ──────────────────────
 if st.session_state.get("scan_done") and 'last_prediction' in st.session_state:
     val = st.session_state['last_prediction']
     label = st.session_state.get('last_label', 'Unknown')
@@ -142,7 +138,6 @@ if st.session_state.get("scan_done") and 'last_prediction' in st.session_state:
         else:
             st.metric("Verdict", "Deepfake")
 
-    # ── Feedback ───────────────────────────────────────────────────
     if st.session_state.get('show_feedback'):
         st.write("---")
         st.markdown("##### Help us improve!")
@@ -176,7 +171,6 @@ if st.session_state.get("scan_done") and 'last_prediction' in st.session_state:
                 st.success("Thank you! We will analyze this error.")
                 st.rerun()
 
-    # ── Reset button ──────────────────────────────────────────────
     st.markdown("---")
     if st.button("New Scan", use_container_width=True):
         for key in ['last_prediction', 'last_label', 'last_threshold', 'last_scan_id', 'show_feedback', 'feedback_negative', 'scan_done']:

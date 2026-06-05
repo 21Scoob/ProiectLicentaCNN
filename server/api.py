@@ -643,7 +643,7 @@ async def get_stats(request: Request, current_user: User = Depends(get_current_u
 
 
 @app.get("/profile/")
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def get_profile(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     scan_count = db.query(Scan).filter(Scan.user_id == current_user.id).count()
     return {
@@ -670,7 +670,7 @@ class ProfileUpdate(BaseModel):
 
 
 @app.put("/profile/")
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def update_profile(request: Request, data: ProfileUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if data.username is not None:
         clean = data.username.strip()
@@ -696,14 +696,68 @@ class ChangePassword(BaseModel):
     old_password: str = Field(max_length=128)
     new_password: str = Field(min_length=6, max_length=128)
 
+import resend
 
-@app.put("/change-password/")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+assert RESEND_API_KEY is not None, "api key for emailing system nonexistent"
+resend.api_key = RESEND_API_KEY
+
+def send_reset_email(to_email: str, token: str):
+    if not RESEND_API_KEY:
+        print("RESEND_API_KEY missing, skipping email sending. Token:", token)
+        return
+        
+    reset_link = f"{FRONTEND_URL}/Reset_Password?token={token}"
+    html_body = f"<p>Click on this link to reset your password: <a href='{reset_link}'>{reset_link}</a></p><p>If you did not request this, please ignore this email.</p>"
+    
+    try:
+        r = resend.Emails.send({
+            "from": "onboarding@resend.dev",
+            "to": to_email,
+            "subject": "Password Reset Request",
+            "html": html_body
+        })
+        print(f"Sent reset email to {to_email}. Resend response: {r}")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+class ForgotPassword(BaseModel):
+    email: EmailStr
+
+@app.post("/forgot-password/")
 @limiter.limit("3/minute")
-async def change_password(request: Request, data: ChangePassword, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not verify_password(data.old_password, current_user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect current password")
-    if len(data.new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
-    current_user.hashed_password = hash_password(data.new_password)
+async def forgot_password(request: Request, data: ForgotPassword, db: Session = Depends(get_db)):
+    email_clean = data.email.strip().lower()
+    user = db.query(User).filter(User.email == email_clean).first()
+    if user:
+        to_encode = {"sub": user.email, "type": "reset"}
+        expire = datetime.utcnow() + timedelta(minutes=15)
+        to_encode.update({"exp": expire})
+        token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        send_reset_email(user.email, token)
+        
+    return {"status": "success", "message": "If email exists, link was sent."}
+
+class ResetPassword(BaseModel):
+    token: str
+    new_password: str = Field(min_length=6, max_length=128)
+
+@app.post("/reset-password/")
+@limiter.limit("3/minute")
+async def reset_password(request: Request, data: ResetPassword, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(data.token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        token_type: str = payload.get("type")
+        if email is None or token_type != "reset":
+            raise HTTPException(status_code=400, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+        
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+        
+    user.hashed_password = hash_password(data.new_password)
     db.commit()
-    return {"status": "success", "message": "Password changed"}
+    return {"status": "success", "message": "Password reset"}

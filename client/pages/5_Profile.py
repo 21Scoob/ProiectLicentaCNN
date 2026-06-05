@@ -16,12 +16,24 @@ st.markdown("---")
 
 headers = {"Authorization": f"Bearer {st.session_state['auth_token']}"}
 
+
+if "profile_data" not in st.session_state or st.session_state.get("profile_needs_refresh", True):
+    try:
+        res = requests.get(f"{API_URL}/profile/", headers=headers)
+        if res.status_code == 200:
+            st.session_state["profile_data"] = res.json()
+            st.session_state["profile_needs_refresh"] = False
+        else:
+            st.session_state["profile_data"] = None
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+        st.session_state["profile_data"] = None
+
 try:
-    res = requests.get(f"{API_URL}/profile/", headers=headers)
-    if res.status_code == 200:
-        profile = res.json()
+    if st.session_state.get("profile_data"):
+        profile = st.session_state["profile_data"]
         
-        # ── Profile Card ──
+        
         st.subheader(f"Hello, {profile['username']}!")
         
         c1, c2, c3 = st.columns(3)
@@ -36,7 +48,7 @@ try:
         
         st.markdown("---")
         
-        # ── Detection Threshold ──
+        
         st.subheader("Detection Threshold")
         st.caption("Images with a deepfake probability above this value will be classified as Deepfake. Default: 50%.")
         
@@ -61,6 +73,7 @@ try:
                 )
                 if r.status_code == 200:
                     st.success("Threshold updated!")
+                    st.session_state["profile_needs_refresh"] = True
                     st.rerun()
                 else:
                     st.error(r.json().get("detail", "Error updating threshold"))
@@ -69,7 +82,7 @@ try:
         
         st.markdown("---")
         
-        # ── Edit Username ──
+        
         st.subheader("Edit Username")
         new_username = st.text_input("Username", value=profile["username"], key="edit_username")
         
@@ -84,6 +97,7 @@ try:
                     if r.status_code == 200:
                         st.session_state["username"] = new_username.strip()
                         st.success("Username updated!")
+                        st.session_state["profile_needs_refresh"] = True
                         st.rerun()
                     else:
                         st.error(r.json().get("detail", "Error updating username"))
@@ -94,7 +108,7 @@ try:
         
         st.markdown("---")
         
-        # ── Personal Information ──
+        
         st.subheader("Personal Information")
         
         new_name = st.text_input("Full Name", value=profile.get("name") or "", key="edit_name")
@@ -119,6 +133,7 @@ try:
                     )
                     if r.status_code == 200:
                         st.success("Personal information updated!")
+                        st.session_state["profile_needs_refresh"] = True
                         st.rerun()
                     else:
                         st.error(r.json().get("detail", "Error updating profile"))
@@ -129,7 +144,7 @@ try:
         
         st.markdown("---")
         
-        # ── Change Password ──
+        
         st.subheader("Change Password")
         old_pass = st.text_input("Current password", type="password", key="old_pass")
         new_pass = st.text_input("New password", type="password", key="new_pass")
@@ -151,6 +166,8 @@ try:
                     )
                     if r.status_code == 200:
                         st.success("Password changed successfully!")
+                        st.session_state["profile_needs_refresh"] = True
+                        st.rerun()
                     else:
                         st.error(r.json().get("detail", "Error changing password"))
                 except Exception as e:

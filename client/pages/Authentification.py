@@ -46,6 +46,10 @@ if st.session_state['user'] is None:
             except:
                 st.error("Error connecting to the server.")
                 
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Forgot password?", use_container_width=True, type="secondary"):
+            st.switch_page("pages/6_Reset_Password.py")
+                
     with tab_register:
         user_reg = st.text_input("Username", key="reg_user")
         email_reg = st.text_input("Email", key="reg_email").strip().lower()
